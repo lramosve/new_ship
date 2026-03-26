@@ -1,3 +1,26 @@
 # Node.js
 node_modules/
 .env
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Virtual environments
+backend/env/
+.venv/
+venv/
+
+# Frontend build artifacts
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.d.ts
+frontend/vite.config.js
+
+# Local databases
+*.db
+
+# Logs
+*.log
