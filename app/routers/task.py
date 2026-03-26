@@ -10,8 +10,21 @@ from app.dependencies import get_current_user
 from app.models.project import Project as ProjectModel
 from app.models.task import Task as TaskModel
 from app.models.user import User as UserModel
+from app.realtime import manager
 
 router = APIRouter()
+
+
+def broadcast_task_event(event_type: str, task_payload: dict[str, Any] | None = None, task_id: int | None = None):
+    manager.publish(
+        'project-management',
+        {
+            'type': event_type,
+            'entity': 'task',
+            'task_id': task_id if task_id is not None else task_payload['id'],
+            'task': task_payload,
+        },
+    )
 
 
 def validate_relationships(db: Session, project_id: int | None, assignee_id: int | None):
@@ -74,7 +87,9 @@ def create_task(
     db.commit()
     db.refresh(db_task)
     task_with_relations = db.query(TaskModel).options(joinedload(TaskModel.project), joinedload(TaskModel.assignee)).filter(TaskModel.id == db_task.id).first()
-    return serialize_task(task_with_relations)
+    serialized_task = serialize_task(task_with_relations)
+    broadcast_task_event('task.created', serialized_task)
+    return serialized_task
 
 
 @router.get('/tasks/', response_model=schemas.TaskList)
@@ -134,7 +149,9 @@ def update_task(
     db.commit()
     db.refresh(db_task)
     task_with_relations = db.query(TaskModel).options(joinedload(TaskModel.project), joinedload(TaskModel.assignee)).filter(TaskModel.id == task_id).first()
-    return serialize_task(task_with_relations)
+    serialized_task = serialize_task(task_with_relations)
+    broadcast_task_event('task.updated', serialized_task)
+    return serialized_task
 
 
 @router.delete('/tasks/{task_id}', status_code=status.HTTP_204_NO_CONTENT)
@@ -148,4 +165,5 @@ def delete_task(
         raise HTTPException(status_code=404, detail='Task not found')
     db.delete(db_task)
     db.commit()
+    broadcast_task_event('task.deleted', task_payload=None, task_id=task_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

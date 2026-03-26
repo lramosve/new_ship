@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, clearStoredToken, getStoredToken, storeToken } from './api'
 import type {
   AuthenticatedUser,
@@ -326,6 +326,8 @@ function App() {
   const [taskCreateForm, setTaskCreateForm] = useState<TaskFormState>(initialTaskForm)
   const [taskEditForm, setTaskEditForm] = useState<TaskFormState>(initialTaskForm)
   const [projectManagementOverview, setProjectManagementOverview] = useState<ProjectManagementOverview>(initialProjectManagementOverview)
+  const websocketRef = useRef<WebSocket | null>(null)
+  const reconnectTimeoutRef = useRef<number | null>(null)
 
   const loadDashboard = async () => {
     try {
@@ -379,6 +381,55 @@ function App() {
   useEffect(() => {
     void Promise.all([loadDashboard(), loadCurrentUser()])
   }, [])
+
+  useEffect(() => {
+    if (!currentUser) {
+      if (reconnectTimeoutRef.current !== null) {
+        window.clearTimeout(reconnectTimeoutRef.current)
+        reconnectTimeoutRef.current = null
+      }
+      websocketRef.current?.close()
+      websocketRef.current = null
+      return
+    }
+
+    let disposed = false
+
+    const connect = () => {
+      const token = getStoredToken()
+      if (!token || disposed) return
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const baseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '')
+      const wsBase = baseUrl && baseUrl.length > 0
+        ? baseUrl.replace(/^http/, 'ws')
+        : `${protocol}//${window.location.host}/api`
+      const websocket = new WebSocket(`${wsBase}/ws/project-management?token=${encodeURIComponent(token)}`)
+      websocketRef.current = websocket
+
+      websocket.onmessage = (event) => {
+        const payload = JSON.parse(event.data) as { type: string }
+        if (payload.type === 'connected') return
+        void loadDashboard()
+      }
+
+      websocket.onclose = () => {
+        if (disposed) return
+        reconnectTimeoutRef.current = window.setTimeout(() => connect(), 2000)
+      }
+    }
+
+    connect()
+
+    return () => {
+      disposed = true
+      if (reconnectTimeoutRef.current !== null) {
+        window.clearTimeout(reconnectTimeoutRef.current)
+        reconnectTimeoutRef.current = null
+      }
+      websocketRef.current?.close()
+      websocketRef.current = null
+    }
+  }, [currentUser])
 
   const totals = useMemo(
     () => [
