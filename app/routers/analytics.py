@@ -1,7 +1,7 @@
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
@@ -15,6 +15,7 @@ from app.schemas.analytics import (
     TaskStatusDistribution,
     TaskTrendPoint,
 )
+from app.schemas.task import TaskPriority, TaskStatus
 
 router = APIRouter(prefix='/analytics', tags=['Analytics'])
 
@@ -35,16 +36,7 @@ PRIORITY_LABELS = {
 }
 
 
-@router.get('/overview', response_model=AnalyticsOverview)
-def get_analytics_overview(db: Session = Depends(get_db)):
-    tasks = (
-        db.query(Task)
-        .options(joinedload(Task.project), joinedload(Task.assignee))
-        .order_by(Task.created_at.asc(), Task.id.asc())
-        .all()
-    )
-    projects = db.query(Project).order_by(Project.name.asc(), Project.id.asc()).all()
-
+def build_analytics_overview(tasks: list[Task], projects: list[Project]) -> AnalyticsOverview:
     today = date.today()
     total_tasks = len(tasks)
     completed_tasks = sum(1 for task in tasks if task.status == 'done')
@@ -109,8 +101,12 @@ def get_analytics_overview(db: Session = Depends(get_db)):
         tasks_by_project[task.project_id].append(task)
 
     project_progress: list[ProjectProgressSnapshot] = []
+    seen_project_ids: set[int] = set()
     for project in projects:
         project_tasks = tasks_by_project.get(project.id, [])
+        if not project_tasks:
+            continue
+        seen_project_ids.add(project.id)
         project_total = len(project_tasks)
         project_completed = sum(1 for task in project_tasks if task.status == 'done')
         project_average_progress = round(sum(task.progress for task in project_tasks) / project_total) if project_total else 0
@@ -119,6 +115,24 @@ def get_analytics_overview(db: Session = Depends(get_db)):
             ProjectProgressSnapshot(
                 project_id=project.id,
                 project_name=project.name,
+                total_tasks=project_total,
+                completed_tasks=project_completed,
+                average_progress=project_average_progress,
+                completion_rate=project_completion_rate,
+            )
+        )
+
+    for project_id, project_tasks in tasks_by_project.items():
+        if project_id is None or project_id in seen_project_ids:
+            continue
+        project_total = len(project_tasks)
+        project_completed = sum(1 for task in project_tasks if task.status == 'done')
+        project_average_progress = round(sum(task.progress for task in project_tasks) / project_total) if project_total else 0
+        project_completion_rate = round((project_completed / project_total) * 100) if project_total else 0
+        project_progress.append(
+            ProjectProgressSnapshot(
+                project_id=project_id,
+                project_name=f'Project #{project_id}',
                 total_tasks=project_total,
                 completed_tasks=project_completed,
                 average_progress=project_average_progress,
@@ -157,3 +171,41 @@ def get_analytics_overview(db: Session = Depends(get_db)):
         priority_distribution=priority_distribution,
         project_progress=project_progress,
     )
+
+
+@router.get('/overview', response_model=AnalyticsOverview)
+def get_analytics_overview(
+    status: TaskStatus | None = Query(default=None),
+    priority: TaskPriority | None = Query(default=None),
+    project_id: int | None = Query(default=None),
+    q: str | None = Query(default=None, min_length=1),
+    db: Session = Depends(get_db),
+):
+    tasks_query = db.query(Task).options(joinedload(Task.project), joinedload(Task.assignee))
+
+    if status is not None:
+        tasks_query = tasks_query.filter(Task.status == status)
+    if priority is not None:
+        tasks_query = tasks_query.filter(Task.priority == priority)
+    if project_id is not None:
+        if project_id == 0:
+            tasks_query = tasks_query.filter(Task.project_id.is_(None))
+        else:
+            tasks_query = tasks_query.filter(Task.project_id == project_id)
+
+    tasks = tasks_query.order_by(Task.created_at.asc(), Task.id.asc()).all()
+
+    if q is not None:
+        query = q.strip().lower()
+        tasks = [
+            task
+            for task in tasks
+            if query in (
+                f"{task.title} {task.status} {task.priority} {task.description or ''} {task.project.name if task.project else ''} {task.assignee.name if task.assignee else ''}"
+            ).lower()
+        ]
+
+    project_ids = sorted({task.project_id for task in tasks if task.project_id is not None})
+    projects = db.query(Project).filter(Project.id.in_(project_ids)).order_by(Project.name.asc(), Project.id.asc()).all() if project_ids else []
+
+    return build_analytics_overview(tasks, projects)
