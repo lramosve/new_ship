@@ -19,12 +19,13 @@ def authenticate_websocket(token: str, db: Session) -> UserModel:
         subject = payload.get('sub')
         if subject is None:
             raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason='Invalid authentication token')
+        user_id = int(subject)
     except Exception as error:
-        if is_token_error(error):
+        if is_token_error(error) or isinstance(error, ValueError):
             raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason='Invalid authentication token') from error
         raise
 
-    user = db.query(UserModel).filter(UserModel.id == int(subject)).first()
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
     if user is None:
         raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason='Authenticated user not found')
     return user

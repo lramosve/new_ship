@@ -37,17 +37,17 @@ def read_users(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
     return schemas.UserList(items=users, total=total)
 
 
+@router.get('/users/me', response_model=schemas.AuthenticatedUser)
+def read_current_user(current_user: UserModel = Depends(get_current_user)):
+    return schemas.AuthenticatedUser(id=current_user.id, name=current_user.name, email=current_user.email)
+
+
 @router.get('/users/{user_id}', response_model=schemas.User)
 def read_user(user_id: int, db: Session = Depends(get_db)):
     user = db.query(UserModel).filter(UserModel.id == user_id).first()
     if user is None:
         raise HTTPException(status_code=404, detail='User not found')
     return user
-
-
-@router.get('/users/me', response_model=schemas.AuthenticatedUser)
-def read_current_user(current_user: UserModel = Depends(get_current_user)):
-    return schemas.AuthenticatedUser(id=current_user.id, name=current_user.name, email=current_user.email)
 
 
 @router.put('/users/{user_id}', response_model=schemas.User)

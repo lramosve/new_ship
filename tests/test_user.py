@@ -27,6 +27,16 @@ def test_login_returns_token(client):
     assert 'access_token' in response.json()
 
 
+def test_current_user_returns_authenticated_identity(client):
+    client.post('/users/', json={'name': 'Ada Lovelace', 'email': 'ada@example.com', 'password': 'password123'})
+    login_response = client.post('/auth/login', json={'email': 'ada@example.com', 'password': 'password123'})
+    token = login_response.json()['access_token']
+
+    me_response = client.get('/users/me', headers={'Authorization': f'Bearer {token}'})
+
+    assert me_response.status_code == 200
+    assert me_response.json()['email'] == 'ada@example.com'
+
 
 def test_create_user_rejects_duplicate_email(client):
     first = client.post(

@@ -21,12 +21,13 @@ def get_current_user(
         subject = payload.get('sub')
         if subject is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid authentication token')
+        user_id = int(subject)
     except Exception as error:
-        if is_token_error(error):
+        if is_token_error(error) or isinstance(error, ValueError):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid authentication token') from error
         raise
 
-    user = db.query(UserModel).filter(UserModel.id == int(subject)).first()
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Authenticated user not found')
     return user

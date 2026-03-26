@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, clearStoredToken, getStoredToken, storeToken } from './api'
+import { mergeProjectManagementOverview } from './projectManagement'
 import type {
   AnalyticsOverview,
   AnalyticsQuery,
@@ -367,7 +368,7 @@ function App() {
       setLoading(true)
       setError(null)
 
-      const [health, projects, documents, users, issues, plans, tasks, overview, analytics] = await Promise.all([
+      const [health, projects, documents, users, issues, plans, tasks, analytics, overviewResult] = await Promise.all([
         api.health(),
         api.projects(),
         api.documents(),
@@ -375,11 +376,16 @@ function App() {
         api.issues(),
         api.plans(),
         api.tasks(),
-        api.projectManagementOverview(),
         api.analyticsOverview(),
+        api.projectManagementOverview()
+          .then((overview) => ({ overview, error: null as string | null }))
+          .catch((overviewError: unknown) => ({
+            overview: null,
+            error: overviewError instanceof Error ? overviewError.message : 'Unknown error while loading project management overview',
+          })),
       ])
 
-      setData({
+      const nextData = {
         health,
         projects: projects.items,
         documents: documents.items,
@@ -387,9 +393,19 @@ function App() {
         issues: issues.items,
         plans: plans.items,
         tasks: tasks.items,
-      })
-      setProjectManagementOverview(overview)
+      }
+
+      setData(nextData)
+      setProjectManagementOverview(
+        mergeProjectManagementOverview(overviewResult.overview, nextData.tasks, nextData.projects, nextData.users),
+      )
       setAnalyticsOverview(analytics)
+      if (overviewResult.error) {
+        setMutation((current) => ({
+          ...current,
+          message: current.message ?? 'Project management insights are using local fallback data.',
+        }))
+      }
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : 'Unknown error while loading dashboard'
       setError(message)
@@ -537,9 +553,14 @@ function App() {
     )
   }, [data.tasks, searchQuery])
 
+  const effectiveProjectManagementOverview = useMemo(
+    () => mergeProjectManagementOverview(projectManagementOverview, data.tasks, data.projects, data.users),
+    [data.projects, data.tasks, data.users, projectManagementOverview],
+  )
+
   const kanbanColumns = useMemo(
     () =>
-      projectManagementOverview.kanban.map((column) => ({
+      effectiveProjectManagementOverview.kanban.map((column) => ({
         ...column,
         tasks: column.tasks.filter(
           (task) =>
@@ -549,19 +570,19 @@ function App() {
               .includes(searchQuery.trim().toLowerCase()),
         ),
       })),
-    [projectManagementOverview.kanban, searchQuery],
+    [effectiveProjectManagementOverview.kanban, searchQuery],
   )
 
   const ganttTasks = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
-    return projectManagementOverview.gantt.filter(
+    return effectiveProjectManagementOverview.gantt.filter(
       ({ task }) =>
         !query ||
         `${task.title} ${task.status} ${task.priority} ${task.description ?? ''} ${task.project?.name ?? ''} ${task.assignee?.name ?? ''}`
           .toLowerCase()
           .includes(query),
     )
-  }, [projectManagementOverview.gantt, searchQuery])
+  }, [effectiveProjectManagementOverview.gantt, searchQuery])
 
   const projectTaskSnapshots = useMemo(() => {
     const snapshotMap = new Map<number | null, { projectName: string; totalTasks: number; completedTasks: number; overdueTasks: number; avgProgressTotal: number }>()
@@ -602,13 +623,13 @@ function App() {
   }, [filteredTasks])
 
   const timelineMarkers = useMemo(() => {
-    const totalDays = Math.max(projectManagementOverview.timeline.total_days, 0)
-    if (totalDays === 0 || !projectManagementOverview.timeline.start_date) {
+    const totalDays = Math.max(effectiveProjectManagementOverview.timeline.total_days, 0)
+    if (totalDays === 0 || !effectiveProjectManagementOverview.timeline.start_date) {
       return []
     }
 
     const markerCount = Math.min(totalDays, 5)
-    const start = new Date(`${projectManagementOverview.timeline.start_date}T00:00:00`)
+    const start = new Date(`${effectiveProjectManagementOverview.timeline.start_date}T00:00:00`)
     return Array.from({ length: markerCount }, (_, index) => {
       const dayOffset = markerCount === 1 ? 0 : Math.round((index * Math.max(totalDays - 1, 0)) / (markerCount - 1))
       const markerDate = new Date(start)
@@ -618,16 +639,16 @@ function App() {
         position: totalDays <= 1 ? 0 : (dayOffset / totalDays) * 100,
       }
     })
-  }, [projectManagementOverview.timeline.start_date, projectManagementOverview.timeline.total_days])
+  }, [effectiveProjectManagementOverview.timeline.start_date, effectiveProjectManagementOverview.timeline.total_days])
 
   const assignmentCapacity = useMemo(() => {
-    const maxTasks = Math.max(1, ...projectManagementOverview.assignment_workload.map((entry) => entry.total_tasks))
-    return projectManagementOverview.assignment_workload.map((entry) => ({
+    const maxTasks = Math.max(1, ...effectiveProjectManagementOverview.assignment_workload.map((entry) => entry.total_tasks))
+    return effectiveProjectManagementOverview.assignment_workload.map((entry) => ({
       ...entry,
       loadPercent: Math.round((entry.total_tasks / maxTasks) * 100),
       throughputPercent: entry.total_tasks > 0 ? Math.round((entry.completed_tasks / entry.total_tasks) * 100) : 0,
     }))
-  }, [projectManagementOverview.assignment_workload])
+  }, [effectiveProjectManagementOverview.assignment_workload])
 
   const isBusy = (action: string) => mutation.activeAction === action
 
@@ -1438,27 +1459,27 @@ function App() {
                 <div className="stats-grid management-stats-grid">
                   <article className="stat-card">
                     <span>Managed projects</span>
-                    <strong>{projectManagementOverview.summary.total_projects}</strong>
+                    <strong>{effectiveProjectManagementOverview.summary.total_projects}</strong>
                   </article>
                   <article className="stat-card">
                     <span>Total tasks</span>
-                    <strong>{projectManagementOverview.summary.total_tasks}</strong>
+                    <strong>{effectiveProjectManagementOverview.summary.total_tasks}</strong>
                   </article>
                   <article className="stat-card">
                     <span>Completed</span>
-                    <strong>{projectManagementOverview.summary.completed_tasks}</strong>
+                    <strong>{effectiveProjectManagementOverview.summary.completed_tasks}</strong>
                   </article>
                   <article className="stat-card">
                     <span>Completion rate</span>
-                    <strong>{projectManagementOverview.summary.completion_rate}%</strong>
+                    <strong>{effectiveProjectManagementOverview.summary.completion_rate}%</strong>
                   </article>
                   <article className="stat-card">
                     <span>Unassigned</span>
-                    <strong>{projectManagementOverview.summary.unassigned_tasks}</strong>
+                    <strong>{effectiveProjectManagementOverview.summary.unassigned_tasks}</strong>
                   </article>
                   <article className="stat-card">
                     <span>Overdue</span>
-                    <strong>{projectManagementOverview.summary.overdue_tasks}</strong>
+                    <strong>{effectiveProjectManagementOverview.summary.overdue_tasks}</strong>
                   </article>
                 </div>
                 <div className="resource-list workload-list">
@@ -1566,8 +1587,8 @@ function App() {
                   <div>
                     <h3>Gantt timeline</h3>
                     <p>
-                      {projectManagementOverview.timeline.start_date && projectManagementOverview.timeline.end_date
-                        ? `Timeline spans ${formatShortDate(projectManagementOverview.timeline.start_date)} to ${formatShortDate(projectManagementOverview.timeline.end_date)}.`
+                      {effectiveProjectManagementOverview.timeline.start_date && effectiveProjectManagementOverview.timeline.end_date
+                        ? `Timeline spans ${formatShortDate(effectiveProjectManagementOverview.timeline.start_date)} to ${formatShortDate(effectiveProjectManagementOverview.timeline.end_date)}.`
                         : 'Scheduled tasks appear here when both start and due dates are set.'}
                     </p>
                   </div>
@@ -1583,7 +1604,7 @@ function App() {
                     </div>
                     <div className="gantt-list">
                       {ganttTasks.map(({ task, offset_days, duration_days }) => {
-                        const totalDays = Math.max(projectManagementOverview.timeline.total_days, 1)
+                        const totalDays = Math.max(effectiveProjectManagementOverview.timeline.total_days, 1)
                         const offsetPercent = (offset_days / totalDays) * 100
                         const widthPercent = (duration_days / totalDays) * 100
                         return (
