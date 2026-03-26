@@ -17,7 +17,8 @@ import type {
   UserUpdatePayload,
 } from './types'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
+const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '')
+const API_BASE_URL = configuredBaseUrl && configuredBaseUrl.length > 0 ? configuredBaseUrl : '/api'
 const TOKEN_STORAGE_KEY = 'shipyard-access-token'
 
 type RequestOptions = {

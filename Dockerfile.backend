@@ -1,0 +1,22 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DATABASE_URL=sqlite:///./data/ship_db.db \
+    SECRET_KEY=shipyard-docker-secret
+
+WORKDIR /app
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir email-validator python-jose[cryptography]
+
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
+COPY app ./app
+
+RUN mkdir -p /app/data
+
+EXPOSE 8000
+
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

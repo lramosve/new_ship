@@ -1,0 +1,28 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: shipyard-backend
+    environment:
+      DATABASE_URL: sqlite:///./data/ship_db.db
+      SECRET_KEY: shipyard-docker-secret
+    volumes:
+      - shipyard_data:/app/data
+    ports:
+      - '8000:8000'
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    container_name: shipyard-frontend
+    depends_on:
+      - backend
+    ports:
+      - '8080:80'
+
+volumes:
+  shipyard_data:
