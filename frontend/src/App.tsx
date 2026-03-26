@@ -563,6 +563,71 @@ function App() {
     )
   }, [projectManagementOverview.gantt, searchQuery])
 
+  const projectTaskSnapshots = useMemo(() => {
+    const snapshotMap = new Map<number | null, { projectName: string; totalTasks: number; completedTasks: number; overdueTasks: number; avgProgressTotal: number }>()
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    filteredTasks.forEach((task) => {
+      const projectId = task.project?.id ?? task.project_id ?? null
+      const projectName = task.project?.name ?? 'Unassigned'
+      const snapshot = snapshotMap.get(projectId) ?? {
+        projectName,
+        totalTasks: 0,
+        completedTasks: 0,
+        overdueTasks: 0,
+        avgProgressTotal: 0,
+      }
+      snapshot.totalTasks += 1
+      snapshot.avgProgressTotal += task.progress
+      if (task.status === 'done') snapshot.completedTasks += 1
+      if (task.due_date && task.status !== 'done') {
+        const dueDate = new Date(`${task.due_date}T00:00:00`)
+        if (dueDate < today) snapshot.overdueTasks += 1
+      }
+      snapshotMap.set(projectId, snapshot)
+    })
+
+    return Array.from(snapshotMap.entries())
+      .map(([projectId, snapshot]) => ({
+        projectId,
+        projectName: snapshot.projectName,
+        totalTasks: snapshot.totalTasks,
+        completedTasks: snapshot.completedTasks,
+        overdueTasks: snapshot.overdueTasks,
+        avgProgress: snapshot.totalTasks > 0 ? Math.round(snapshot.avgProgressTotal / snapshot.totalTasks) : 0,
+        completionRate: snapshot.totalTasks > 0 ? Math.round((snapshot.completedTasks / snapshot.totalTasks) * 100) : 0,
+      }))
+      .sort((left, right) => right.totalTasks - left.totalTasks || left.projectName.localeCompare(right.projectName))
+  }, [filteredTasks])
+
+  const timelineMarkers = useMemo(() => {
+    const totalDays = Math.max(projectManagementOverview.timeline.total_days, 0)
+    if (totalDays === 0 || !projectManagementOverview.timeline.start_date) {
+      return []
+    }
+
+    const markerCount = Math.min(totalDays, 5)
+    const start = new Date(`${projectManagementOverview.timeline.start_date}T00:00:00`)
+    return Array.from({ length: markerCount }, (_, index) => {
+      const dayOffset = markerCount === 1 ? 0 : Math.round((index * Math.max(totalDays - 1, 0)) / (markerCount - 1))
+      const markerDate = new Date(start)
+      markerDate.setDate(start.getDate() + dayOffset)
+      return {
+        label: markerDate.toLocaleDateString(),
+        position: totalDays <= 1 ? 0 : (dayOffset / totalDays) * 100,
+      }
+    })
+  }, [projectManagementOverview.timeline.start_date, projectManagementOverview.timeline.total_days])
+
+  const assignmentCapacity = useMemo(() => {
+    const maxTasks = Math.max(1, ...projectManagementOverview.assignment_workload.map((entry) => entry.total_tasks))
+    return projectManagementOverview.assignment_workload.map((entry) => ({
+      ...entry,
+      loadPercent: Math.round((entry.total_tasks / maxTasks) * 100),
+      throughputPercent: entry.total_tasks > 0 ? Math.round((entry.completed_tasks / entry.total_tasks) * 100) : 0,
+    }))
+  }, [projectManagementOverview.assignment_workload])
 
   const isBusy = (action: string) => mutation.activeAction === action
 
@@ -1396,11 +1461,29 @@ function App() {
                     <strong>{projectManagementOverview.summary.overdue_tasks}</strong>
                   </article>
                 </div>
-                <div className="resource-list">
-                  {projectManagementOverview.assignment_workload.length > 0 ? (
-                    projectManagementOverview.assignment_workload.map((entry) => (
-                      <article className="item-card" key={`workload-${entry.assignee_id ?? 'unassigned'}`}>
+                <div className="resource-list workload-list">
+                  {assignmentCapacity.length > 0 ? (
+                    assignmentCapacity.map((entry) => (
+                      <article className="item-card workload-card" key={`workload-${entry.assignee_id ?? 'unassigned'}`}>
                         <div className="item-header"><h4>{entry.assignee_name}</h4><span className="badge">{entry.total_tasks} tasks</span></div>
+                        <div className="capacity-block">
+                          <div className="capacity-header">
+                            <small>Capacity load</small>
+                            <strong>{entry.loadPercent}%</strong>
+                          </div>
+                          <div className="distribution-bar-track">
+                            <div className="distribution-bar-fill" style={{ width: `${entry.loadPercent}%` }} />
+                          </div>
+                        </div>
+                        <div className="capacity-block">
+                          <div className="capacity-header">
+                            <small>Delivery throughput</small>
+                            <strong>{entry.throughputPercent}%</strong>
+                          </div>
+                          <div className="distribution-bar-track">
+                            <div className="distribution-bar-fill priority" style={{ width: `${entry.throughputPercent}%` }} />
+                          </div>
+                        </div>
                         <div className="task-meta-grid">
                           <small>To do: {entry.todo_tasks}</small>
                           <small>Active: {entry.in_progress_tasks}</small>
@@ -1411,6 +1494,26 @@ function App() {
                     ))
                   ) : (
                     <EmptyState message="Create tasks to populate assignment workload insights." />
+                  )}
+                </div>
+                <div className="resource-list project-snapshot-list">
+                  {projectTaskSnapshots.length > 0 ? (
+                    projectTaskSnapshots.map((projectSnapshot) => (
+                      <article className="item-card project-snapshot-card" key={`project-snapshot-${projectSnapshot.projectId ?? 'unassigned'}`}>
+                        <div className="item-header"><h4>{projectSnapshot.projectName}</h4><span className="badge accent">{projectSnapshot.completionRate}% complete</span></div>
+                        <div className="task-meta-grid">
+                          <small>Total tasks: {projectSnapshot.totalTasks}</small>
+                          <small>Completed: {projectSnapshot.completedTasks}</small>
+                          <small>Overdue: {projectSnapshot.overdueTasks}</small>
+                          <small>Average progress: {projectSnapshot.avgProgress}%</small>
+                        </div>
+                        <div className="distribution-bar-track">
+                          <div className="distribution-bar-fill" style={{ width: `${projectSnapshot.avgProgress}%` }} />
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <EmptyState message="Task project snapshots will appear when tasks are created." />
                   )}
                 </div>
               </section>
@@ -1470,26 +1573,36 @@ function App() {
                   </div>
                 </div>
                 {ganttTasks.length > 0 ? (
-                  <div className="gantt-list">
-                    {ganttTasks.map(({ task, offset_days, duration_days }) => {
-                      const totalDays = Math.max(projectManagementOverview.timeline.total_days, 1)
-                      const offsetPercent = (offset_days / totalDays) * 100
-                      const widthPercent = (duration_days / totalDays) * 100
-                      return (
-                        <div className="gantt-row" key={`gantt-${task.id}`}>
-                          <div className="gantt-task-label">
-                            <strong>{task.title}</strong>
-                            <small>{task.project?.name ?? 'No project'} · {task.assignee?.name ?? 'Unassigned'}</small>
-                          </div>
-                          <div className="gantt-track">
-                            <div className="gantt-bar" style={{ left: `${offsetPercent}%`, width: `${Math.max(widthPercent, 8)}%` }}>
-                              <div className="gantt-progress" style={{ width: `${task.progress}%` }} />
-                              <span>{formatShortDate(task.start_date)} → {formatShortDate(task.due_date)}</span>
+                  <div className="gantt-board">
+                    <div className="gantt-scale">
+                      {timelineMarkers.map((marker) => (
+                        <div className="gantt-scale-marker" key={`timeline-marker-${marker.label}`} style={{ left: `${marker.position}%` }}>
+                          <span>{marker.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="gantt-list">
+                      {ganttTasks.map(({ task, offset_days, duration_days }) => {
+                        const totalDays = Math.max(projectManagementOverview.timeline.total_days, 1)
+                        const offsetPercent = (offset_days / totalDays) * 100
+                        const widthPercent = (duration_days / totalDays) * 100
+                        return (
+                          <div className="gantt-row" key={`gantt-${task.id}`}>
+                            <div className="gantt-task-label">
+                              <strong>{task.title}</strong>
+                              <small>{task.project?.name ?? 'No project'} · {task.assignee?.name ?? 'Unassigned'}</small>
+                            </div>
+                            <div className="gantt-track">
+                              <div className="gantt-track-grid" />
+                              <div className="gantt-bar" style={{ left: `${offsetPercent}%`, width: `${Math.max(widthPercent, 8)}%` }}>
+                                <div className="gantt-progress" style={{ width: `${task.progress}%` }} />
+                                <span>{formatShortDate(task.start_date)} → {formatShortDate(task.due_date)}</span>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      )
-                    })}
+                        )
+                      })}
+                    </div>
                   </div>
                 ) : (
                   <EmptyState message="Add start and due dates to tasks to populate the timeline." />

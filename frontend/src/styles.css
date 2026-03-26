@@ -412,7 +412,9 @@ button.danger {
 }
 
 .distribution-list,
-.trend-list {
+.trend-list,
+.workload-list,
+.project-snapshot-list {
   gap: 12px;
 }
 
@@ -453,6 +455,56 @@ button.danger {
   margin-bottom: 6px;
 }
 
+.capacity-block {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.capacity-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.capacity-header small {
+  color: #94a3b8;
+}
+
+.capacity-header strong {
+  font-size: 0.95rem;
+}
+
+.gantt-board {
+  display: grid;
+  gap: 14px;
+}
+
+.gantt-scale {
+  position: relative;
+  height: 24px;
+  margin-left: 220px;
+}
+
+.gantt-scale-marker {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  color: #94a3b8;
+  font-size: 0.75rem;
+}
+
+.gantt-scale-marker::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 18px;
+  width: 1px;
+  height: 10px;
+  background: rgba(148, 163, 184, 0.35);
+}
+
 .gantt-list {
   gap: 12px;
 }
@@ -478,6 +530,13 @@ button.danger {
   background: rgba(15, 23, 42, 0.92);
   border: 1px solid rgba(148, 163, 184, 0.14);
   overflow: hidden;
+}
+
+.gantt-track-grid {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(to right, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+  background-size: 20% 100%;
 }
 
 .gantt-bar {
@@ -510,6 +569,10 @@ button.danger {
   .task-overview-grid,
   .gantt-row {
     grid-template-columns: 1fr;
+  }
+
+  .gantt-scale {
+    margin-left: 0;
   }
 
   .kanban-grid {

@@ -1,12 +1,13 @@
 import hashlib
-import os
 from datetime import UTC, datetime, timedelta
 
 from jose import JWTError, jwt
 
+from app.core.settings import settings
+
 ALGORITHM = 'HS256'
-SECRET_KEY = os.getenv('SECRET_KEY', 'shipyard-dev-secret-key')
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+SECRET_KEY = settings.secret_key
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 
 
 def hash_password(password: str) -> str:
