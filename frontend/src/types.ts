@@ -176,3 +176,47 @@ export type ProjectManagementOverview = {
   assignment_workload: AssignmentSummary[]
   timeline: TimelineBounds
 }
+
+export type AnalyticsSummary = {
+  total_tasks: number
+  completed_tasks: number
+  in_progress_tasks: number
+  overdue_tasks: number
+  completion_rate: number
+  average_progress: number
+}
+
+export type TaskTrendPoint = {
+  date: string
+  created_tasks: number
+  completed_tasks: number
+}
+
+export type TaskStatusDistribution = {
+  status: TaskStatus
+  label: string
+  count: number
+}
+
+export type PriorityDistribution = {
+  priority: TaskPriority
+  label: string
+  count: number
+}
+
+export type ProjectProgressSnapshot = {
+  project_id: number | null
+  project_name: string
+  total_tasks: number
+  completed_tasks: number
+  average_progress: number
+  completion_rate: number
+}
+
+export type AnalyticsOverview = {
+  summary: AnalyticsSummary
+  task_trends: TaskTrendPoint[]
+  status_distribution: TaskStatusDistribution[]
+  priority_distribution: PriorityDistribution[]
+  project_progress: ProjectProgressSnapshot[]
+}

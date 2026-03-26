@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, clearStoredToken, getStoredToken, storeToken } from './api'
 import type {
+  AnalyticsOverview,
   AuthenticatedUser,
   Document,
   DocumentPayload,
@@ -31,7 +32,7 @@ type DashboardData = {
   tasks: Task[]
 }
 
-type ResourceKey = 'projects' | 'documents' | 'users' | 'issues' | 'plans' | 'tasks'
+type ResourceKey = 'projects' | 'documents' | 'users' | 'issues' | 'plans' | 'tasks' | 'analytics'
 
 type EditingState = {
   projectId: number | null
@@ -67,6 +68,12 @@ type TaskFormState = {
   assignee_id: string
 }
 
+type AnalyticsFilterState = {
+  status: 'all' | TaskStatus
+  priority: 'all' | TaskPriority
+  projectId: 'all' | string
+}
+
 const tabOptions: TabOption[] = [
   { key: 'projects', label: 'Projects' },
   { key: 'documents', label: 'Documents' },
@@ -74,6 +81,7 @@ const tabOptions: TabOption[] = [
   { key: 'issues', label: 'Issues' },
   { key: 'plans', label: 'Plans' },
   { key: 'tasks', label: 'Tasks' },
+  { key: 'analytics', label: 'Analytics' },
 ]
 
 const taskStatusOptions: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done']
@@ -115,6 +123,21 @@ const initialProjectManagementOverview: ProjectManagementOverview = {
     end_date: null,
     total_days: 0,
   },
+}
+
+const initialAnalyticsOverview: AnalyticsOverview = {
+  summary: {
+    total_tasks: 0,
+    completed_tasks: 0,
+    in_progress_tasks: 0,
+    overdue_tasks: 0,
+    completion_rate: 0,
+    average_progress: 0,
+  },
+  task_trends: [],
+  status_distribution: [],
+  priority_distribution: [],
+  project_progress: [],
 }
 
 const initialLoginForm: LoginPayload = {
@@ -166,6 +189,12 @@ const initialTaskForm: TaskFormState = {
   due_date: '',
   project_id: '',
   assignee_id: '',
+}
+
+const initialAnalyticsFilters: AnalyticsFilterState = {
+  status: 'all',
+  priority: 'all',
+  projectId: 'all',
 }
 
 function formatDate(value: string) {
@@ -311,6 +340,7 @@ function App() {
   const [editing, setEditing] = useState<EditingState>(initialEditingState)
   const [activeTab, setActiveTab] = useState<ResourceKey>('projects')
   const [searchQuery, setSearchQuery] = useState('')
+  const [analyticsFilters, setAnalyticsFilters] = useState<AnalyticsFilterState>(initialAnalyticsFilters)
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({})
 
   const [projectCreateForm, setProjectCreateForm] = useState<ProjectPayload>(initialProjectForm)
@@ -326,6 +356,7 @@ function App() {
   const [taskCreateForm, setTaskCreateForm] = useState<TaskFormState>(initialTaskForm)
   const [taskEditForm, setTaskEditForm] = useState<TaskFormState>(initialTaskForm)
   const [projectManagementOverview, setProjectManagementOverview] = useState<ProjectManagementOverview>(initialProjectManagementOverview)
+  const [analyticsOverview, setAnalyticsOverview] = useState<AnalyticsOverview>(initialAnalyticsOverview)
   const websocketRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<number | null>(null)
 
@@ -334,7 +365,7 @@ function App() {
       setLoading(true)
       setError(null)
 
-      const [health, projects, documents, users, issues, plans, tasks, overview] = await Promise.all([
+      const [health, projects, documents, users, issues, plans, tasks, overview, analytics] = await Promise.all([
         api.health(),
         api.projects(),
         api.documents(),
@@ -343,6 +374,7 @@ function App() {
         api.plans(),
         api.tasks(),
         api.projectManagementOverview(),
+        api.analyticsOverview(),
       ])
 
       setData({
@@ -355,6 +387,7 @@ function App() {
         tasks: tasks.items,
       })
       setProjectManagementOverview(overview)
+      setAnalyticsOverview(analytics)
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : 'Unknown error while loading dashboard'
       setError(message)
@@ -504,6 +537,106 @@ function App() {
           .includes(query),
     )
   }, [projectManagementOverview.gantt, searchQuery])
+
+  const filteredAnalyticsTasks = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    return data.tasks.filter((task) => {
+      const matchesQuery =
+        !query ||
+        `${task.title} ${task.status} ${task.priority} ${task.description ?? ''} ${task.project?.name ?? ''} ${task.assignee?.name ?? ''}`
+          .toLowerCase()
+          .includes(query)
+      const matchesStatus = analyticsFilters.status === 'all' || task.status === analyticsFilters.status
+      const matchesPriority = analyticsFilters.priority === 'all' || task.priority === analyticsFilters.priority
+      const matchesProject = analyticsFilters.projectId === 'all' || String(task.project_id ?? 'unassigned') === analyticsFilters.projectId
+      return matchesQuery && matchesStatus && matchesPriority && matchesProject
+    })
+  }, [analyticsFilters.priority, analyticsFilters.projectId, analyticsFilters.status, data.tasks, searchQuery])
+
+  const filteredAnalyticsSummary = useMemo(() => {
+    const totalTasks = filteredAnalyticsTasks.length
+    const completedTasks = filteredAnalyticsTasks.filter((task) => task.status === 'done').length
+    const inProgressTasks = filteredAnalyticsTasks.filter((task) => task.status === 'in_progress').length
+    const overdueTasks = filteredAnalyticsTasks.filter((task) => task.due_date && task.due_date < new Date().toISOString().slice(0, 10) && task.status !== 'done').length
+    const averageProgress = totalTasks > 0 ? Math.round(filteredAnalyticsTasks.reduce((sum, task) => sum + task.progress, 0) / totalTasks) : 0
+    const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
+
+    return {
+      total_tasks: totalTasks,
+      completed_tasks: completedTasks,
+      in_progress_tasks: inProgressTasks,
+      overdue_tasks: overdueTasks,
+      average_progress: averageProgress,
+      completion_rate: completionRate,
+    }
+  }, [filteredAnalyticsTasks])
+
+  const filteredAnalyticsStatusDistribution = useMemo(
+    () =>
+      taskStatusOptions.map((status) => ({
+        status,
+        label: analyticsOverview.status_distribution.find((entry) => entry.status === status)?.label ?? status.replace('_', ' '),
+        count: filteredAnalyticsTasks.filter((task) => task.status === status).length,
+      })),
+    [analyticsOverview.status_distribution, filteredAnalyticsTasks],
+  )
+
+  const filteredAnalyticsPriorityDistribution = useMemo(
+    () =>
+      taskPriorityOptions.map((priority) => ({
+        priority,
+        label: analyticsOverview.priority_distribution.find((entry) => entry.priority === priority)?.label ?? priority,
+        count: filteredAnalyticsTasks.filter((task) => task.priority === priority).length,
+      })),
+    [analyticsOverview.priority_distribution, filteredAnalyticsTasks],
+  )
+
+  const filteredAnalyticsProjectProgress = useMemo(() => {
+    const grouped = new Map<string, { project_id: number | null; project_name: string; total_tasks: number; completed_tasks: number; average_progress: number; completion_rate: number }>()
+
+    filteredAnalyticsTasks.forEach((task) => {
+      const key = String(task.project_id ?? 'unassigned')
+      const current = grouped.get(key) ?? {
+        project_id: task.project_id,
+        project_name: task.project?.name ?? 'Unassigned',
+        total_tasks: 0,
+        completed_tasks: 0,
+        average_progress: 0,
+        completion_rate: 0,
+      }
+      current.total_tasks += 1
+      current.completed_tasks += task.status === 'done' ? 1 : 0
+      current.average_progress += task.progress
+      grouped.set(key, current)
+    })
+
+    return Array.from(grouped.values()).map((entry) => ({
+      ...entry,
+      average_progress: entry.total_tasks > 0 ? Math.round(entry.average_progress / entry.total_tasks) : 0,
+      completion_rate: entry.total_tasks > 0 ? Math.round((entry.completed_tasks / entry.total_tasks) * 100) : 0,
+    }))
+  }, [filteredAnalyticsTasks])
+
+  const filteredAnalyticsTrendPoints = useMemo(() => {
+    if (filteredAnalyticsTasks.length === 0) return []
+
+    const trendMap = new Map<string, { date: string; created_tasks: number; completed_tasks: number }>()
+    filteredAnalyticsTasks.forEach((task) => {
+      const createdDate = task.created_at.slice(0, 10)
+      const createdEntry = trendMap.get(createdDate) ?? { date: createdDate, created_tasks: 0, completed_tasks: 0 }
+      createdEntry.created_tasks += 1
+      trendMap.set(createdDate, createdEntry)
+
+      if (task.status === 'done') {
+        const completedDate = task.updated_at.slice(0, 10)
+        const completedEntry = trendMap.get(completedDate) ?? { date: completedDate, created_tasks: 0, completed_tasks: 0 }
+        completedEntry.completed_tasks += 1
+        trendMap.set(completedDate, completedEntry)
+      }
+    })
+
+    return Array.from(trendMap.values()).sort((left, right) => left.date.localeCompare(right.date))
+  }, [filteredAnalyticsTasks])
 
   const isBusy = (action: string) => mutation.activeAction === action
 
@@ -909,6 +1042,38 @@ function App() {
         <div className="search-row">
           <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder={`Search ${activeTab}...`} />
         </div>
+        {activeTab === 'analytics' && (
+          <div className="analytics-filter-bar">
+            <label>
+              <span>Status</span>
+              <select value={analyticsFilters.status} onChange={(event) => setAnalyticsFilters((current) => ({ ...current, status: event.target.value as AnalyticsFilterState['status'] }))}>
+                <option value="all">All statuses</option>
+                {taskStatusOptions.map((status) => (
+                  <option key={status} value={status}>{status.replace('_', ' ')}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Priority</span>
+              <select value={analyticsFilters.priority} onChange={(event) => setAnalyticsFilters((current) => ({ ...current, priority: event.target.value as AnalyticsFilterState['priority'] }))}>
+                <option value="all">All priorities</option>
+                {taskPriorityOptions.map((priority) => (
+                  <option key={priority} value={priority}>{priority}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Project</span>
+              <select value={analyticsFilters.projectId} onChange={(event) => setAnalyticsFilters((current) => ({ ...current, projectId: event.target.value }))}>
+                <option value="all">All projects</option>
+                <option value="unassigned">Unassigned</option>
+                {data.projects.map((project) => (
+                  <option key={project.id} value={String(project.id)}>{project.name}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
       </section>
 
       <section className="content-grid single-column">
@@ -977,6 +1142,126 @@ function App() {
           {filteredPlans.length === 0 && <EmptyState message="No plans match the current filter." />}
         </ResourceSection>}
 
+        {activeTab === 'analytics' && (
+          <ResourceSection title="Analytics" items={filteredAnalyticsTasks.length} createEnabled={false}>
+            <div className="analytics-grid">
+              <section className="task-panel">
+                <div className="section-heading compact-heading">
+                  <div>
+                    <h3>Filtered analytics summary</h3>
+                    <p>Live rollups based on the current analytics filters and search query.</p>
+                  </div>
+                </div>
+                <div className="stats-grid management-stats-grid">
+                  <article className="stat-card"><span>Total tasks</span><strong>{filteredAnalyticsSummary.total_tasks}</strong></article>
+                  <article className="stat-card"><span>Completed</span><strong>{filteredAnalyticsSummary.completed_tasks}</strong></article>
+                  <article className="stat-card"><span>In progress</span><strong>{filteredAnalyticsSummary.in_progress_tasks}</strong></article>
+                  <article className="stat-card"><span>Overdue</span><strong>{filteredAnalyticsSummary.overdue_tasks}</strong></article>
+                  <article className="stat-card"><span>Completion</span><strong>{filteredAnalyticsSummary.completion_rate}%</strong></article>
+                  <article className="stat-card"><span>Avg progress</span><strong>{filteredAnalyticsSummary.average_progress}%</strong></article>
+                </div>
+              </section>
+
+              <section className="task-panel">
+                <div className="section-heading compact-heading">
+                  <div>
+                    <h3>Status distribution</h3>
+                    <p>Workflow balance within the filtered analytics slice.</p>
+                  </div>
+                </div>
+                <div className="distribution-list">
+                  {filteredAnalyticsStatusDistribution.map((entry) => (
+                    <article className="distribution-card" key={`analytics-status-${entry.status}`}>
+                      <div className="item-header"><h4>{entry.label}</h4><span className="badge">{entry.count}</span></div>
+                      <div className="distribution-bar-track">
+                        <div className="distribution-bar-fill" style={{ width: `${filteredAnalyticsSummary.total_tasks > 0 ? (entry.count / filteredAnalyticsSummary.total_tasks) * 100 : 0}%` }} />
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="task-panel">
+                <div className="section-heading compact-heading">
+                  <div>
+                    <h3>Priority distribution</h3>
+                    <p>Priority mix for the currently selected project and task slice.</p>
+                  </div>
+                </div>
+                <div className="distribution-list">
+                  {filteredAnalyticsPriorityDistribution.map((entry) => (
+                    <article className="distribution-card" key={`analytics-priority-${entry.priority}`}>
+                      <div className="item-header"><h4>{entry.label}</h4><span className="badge accent">{entry.count}</span></div>
+                      <div className="distribution-bar-track">
+                        <div className="distribution-bar-fill priority" style={{ width: `${filteredAnalyticsSummary.total_tasks > 0 ? (entry.count / filteredAnalyticsSummary.total_tasks) * 100 : 0}%` }} />
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="task-panel">
+                <div className="section-heading compact-heading">
+                  <div>
+                    <h3>Trend activity</h3>
+                    <p>Created versus completed work volume for the filtered dataset.</p>
+                  </div>
+                </div>
+                <div className="trend-list">
+                  {filteredAnalyticsTrendPoints.length > 0 ? (
+                    filteredAnalyticsTrendPoints.map((point) => {
+                      const peak = Math.max(1, ...filteredAnalyticsTrendPoints.map((entry) => Math.max(entry.created_tasks, entry.completed_tasks)))
+                      return (
+                        <article className="trend-card" key={`analytics-trend-${point.date}`}>
+                          <div className="item-header"><h4>{formatShortDate(point.date)}</h4><span className="badge">{point.created_tasks + point.completed_tasks} events</span></div>
+                          <div className="trend-bars">
+                            <div>
+                              <small>Created</small>
+                              <div className="distribution-bar-track"><div className="distribution-bar-fill" style={{ width: `${(point.created_tasks / peak) * 100}%` }} /></div>
+                            </div>
+                            <div>
+                              <small>Completed</small>
+                              <div className="distribution-bar-track"><div className="distribution-bar-fill priority" style={{ width: `${(point.completed_tasks / peak) * 100}%` }} /></div>
+                            </div>
+                          </div>
+                        </article>
+                      )
+                    })
+                  ) : (
+                    <EmptyState message="No trend data matches the current analytics filters." />
+                  )}
+                </div>
+              </section>
+
+              <section className="task-panel analytics-span-full">
+                <div className="section-heading compact-heading">
+                  <div>
+                    <h3>Project progress snapshot</h3>
+                    <p>Project-by-project rollups recalculated from the filtered tasks.</p>
+                  </div>
+                </div>
+                <div className="resource-list">
+                  {filteredAnalyticsProjectProgress.length > 0 ? (
+                    filteredAnalyticsProjectProgress.map((entry) => (
+                      <article className="item-card" key={`filtered-project-${entry.project_id ?? 'unassigned'}`}>
+                        <div className="item-header"><h4>{entry.project_name}</h4><span className="badge">{entry.total_tasks} tasks</span></div>
+                        <div className="task-meta-grid">
+                          <small>Completed: {entry.completed_tasks}</small>
+                          <small>Completion rate: {entry.completion_rate}%</small>
+                          <small>Average progress: {entry.average_progress}%</small>
+                          <small>Open tasks: {entry.total_tasks - entry.completed_tasks}</small>
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <EmptyState message="No projects match the current analytics filters." />
+                  )}
+                </div>
+              </section>
+            </div>
+          </ResourceSection>
+        )}
+
         {activeTab === 'tasks' && (
           <ResourceSection title="Tasks" items={filteredTasks.length} createEnabled={Boolean(currentUser)}>
             {currentUser && (
@@ -990,6 +1275,165 @@ function App() {
                 users={data.users}
               />
             )}
+
+            <div className="analytics-grid">
+              <section className="task-panel">
+                <div className="section-heading compact-heading">
+                  <div>
+                    <h3>Analytics summary</h3>
+                    <p>Cross-project throughput, progress, and risk metrics from the analytics service.</p>
+                  </div>
+                </div>
+                <div className="stats-grid management-stats-grid">
+                  <article className="stat-card">
+                    <span>Total tasks</span>
+                    <strong>{analyticsOverview.summary.total_tasks}</strong>
+                  </article>
+                  <article className="stat-card">
+                    <span>Completed</span>
+                    <strong>{analyticsOverview.summary.completed_tasks}</strong>
+                  </article>
+                  <article className="stat-card">
+                    <span>In progress</span>
+                    <strong>{analyticsOverview.summary.in_progress_tasks}</strong>
+                  </article>
+                  <article className="stat-card">
+                    <span>Overdue</span>
+                    <strong>{analyticsOverview.summary.overdue_tasks}</strong>
+                  </article>
+                  <article className="stat-card">
+                    <span>Completion</span>
+                    <strong>{analyticsOverview.summary.completion_rate}%</strong>
+                  </article>
+                  <article className="stat-card">
+                    <span>Avg progress</span>
+                    <strong>{analyticsOverview.summary.average_progress}%</strong>
+                  </article>
+                </div>
+              </section>
+
+              <section className="task-panel">
+                <div className="section-heading compact-heading">
+                  <div>
+                    <h3>Status distribution</h3>
+                    <p>Current workflow balance across all tracked tasks.</p>
+                  </div>
+                </div>
+                <div className="distribution-list">
+                  {analyticsOverview.status_distribution.map((entry) => (
+                    <article className="distribution-card" key={entry.status}>
+                      <div className="item-header">
+                        <h4>{entry.label}</h4>
+                        <span className="badge">{entry.count}</span>
+                      </div>
+                      <div className="distribution-bar-track">
+                        <div
+                          className="distribution-bar-fill"
+                          style={{ width: `${analyticsOverview.summary.total_tasks > 0 ? (entry.count / analyticsOverview.summary.total_tasks) * 100 : 0}%` }}
+                        />
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="task-panel">
+                <div className="section-heading compact-heading">
+                  <div>
+                    <h3>Priority distribution</h3>
+                    <p>Priority mix for planning, escalation, and staffing decisions.</p>
+                  </div>
+                </div>
+                <div className="distribution-list">
+                  {analyticsOverview.priority_distribution.map((entry) => (
+                    <article className="distribution-card" key={entry.priority}>
+                      <div className="item-header">
+                        <h4>{entry.label}</h4>
+                        <span className="badge accent">{entry.count}</span>
+                      </div>
+                      <div className="distribution-bar-track">
+                        <div
+                          className="distribution-bar-fill priority"
+                          style={{ width: `${analyticsOverview.summary.total_tasks > 0 ? (entry.count / analyticsOverview.summary.total_tasks) * 100 : 0}%` }}
+                        />
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="task-panel">
+                <div className="section-heading compact-heading">
+                  <div>
+                    <h3>Task trends</h3>
+                    <p>Daily created versus completed task volume over the available timeline.</p>
+                  </div>
+                </div>
+                <div className="trend-list">
+                  {analyticsOverview.task_trends.length > 0 ? (
+                    analyticsOverview.task_trends.map((point) => {
+                      const peak = Math.max(
+                        1,
+                        ...analyticsOverview.task_trends.map((entry) => Math.max(entry.created_tasks, entry.completed_tasks)),
+                      )
+                      return (
+                        <article className="trend-card" key={point.date}>
+                          <div className="item-header">
+                            <h4>{formatShortDate(point.date)}</h4>
+                            <span className="badge">{point.created_tasks + point.completed_tasks} events</span>
+                          </div>
+                          <div className="trend-bars">
+                            <div>
+                              <small>Created</small>
+                              <div className="distribution-bar-track">
+                                <div className="distribution-bar-fill" style={{ width: `${(point.created_tasks / peak) * 100}%` }} />
+                              </div>
+                            </div>
+                            <div>
+                              <small>Completed</small>
+                              <div className="distribution-bar-track">
+                                <div className="distribution-bar-fill priority" style={{ width: `${(point.completed_tasks / peak) * 100}%` }} />
+                              </div>
+                            </div>
+                          </div>
+                        </article>
+                      )
+                    })
+                  ) : (
+                    <EmptyState message="Create and complete tasks to populate trend analytics." />
+                  )}
+                </div>
+              </section>
+
+              <section className="task-panel analytics-span-full">
+                <div className="section-heading compact-heading">
+                  <div>
+                    <h3>Project progress snapshot</h3>
+                    <p>Per-project completion and progress rollups, including unassigned work.</p>
+                  </div>
+                </div>
+                <div className="resource-list">
+                  {analyticsOverview.project_progress.length > 0 ? (
+                    analyticsOverview.project_progress.map((entry) => (
+                      <article className="item-card" key={`analytics-project-${entry.project_id ?? 'unassigned'}`}>
+                        <div className="item-header">
+                          <h4>{entry.project_name}</h4>
+                          <span className="badge">{entry.total_tasks} tasks</span>
+                        </div>
+                        <div className="task-meta-grid">
+                          <small>Completed: {entry.completed_tasks}</small>
+                          <small>Completion rate: {entry.completion_rate}%</small>
+                          <small>Average progress: {entry.average_progress}%</small>
+                          <small>Open tasks: {entry.total_tasks - entry.completed_tasks}</small>
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <EmptyState message="Project analytics will appear once tasks exist." />
+                  )}
+                </div>
+              </section>
+            </div>
 
             <div className="task-overview-grid">
               <section className="task-panel">

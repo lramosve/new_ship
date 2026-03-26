@@ -1,4 +1,5 @@
 import type {
+  AnalyticsOverview,
   AuthenticatedUser,
   Document,
   DocumentPayload,
@@ -122,6 +123,7 @@ export const api = {
 
   tasks: () => request<ListResponse<Task>>('/tasks/'),
   projectManagementOverview: () => request<ProjectManagementOverview>('/project-management/overview'),
+  analyticsOverview: () => request<AnalyticsOverview>('/analytics/overview'),
   createTask: (payload: TaskPayload) => request<Task>('/tasks/', { method: 'POST', body: payload, auth: true }),
   updateTask: (id: number, payload: TaskPayload) => request<Task>(`/tasks/${id}`, { method: 'PUT', body: payload, auth: true }),
   deleteTask: (id: number) => request<void>(`/tasks/${id}`, { method: 'DELETE', auth: true }),
