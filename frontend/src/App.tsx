@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, clearStoredToken, getStoredToken, storeToken } from './api'
 import type {
   AnalyticsOverview,
+  AnalyticsQuery,
   AuthenticatedUser,
   Document,
   DocumentPayload,
@@ -357,6 +358,7 @@ function App() {
   const [taskEditForm, setTaskEditForm] = useState<TaskFormState>(initialTaskForm)
   const [projectManagementOverview, setProjectManagementOverview] = useState<ProjectManagementOverview>(initialProjectManagementOverview)
   const [analyticsOverview, setAnalyticsOverview] = useState<AnalyticsOverview>(initialAnalyticsOverview)
+  const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const websocketRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<number | null>(null)
 
@@ -414,6 +416,29 @@ function App() {
   useEffect(() => {
     void Promise.all([loadDashboard(), loadCurrentUser()])
   }, [])
+
+  useEffect(() => {
+    const loadFilteredAnalytics = async () => {
+      const query: AnalyticsQuery = {}
+      if (analyticsFilters.status !== 'all') query.status = analyticsFilters.status
+      if (analyticsFilters.priority !== 'all') query.priority = analyticsFilters.priority
+      if (analyticsFilters.projectId !== 'all') query.project_id = analyticsFilters.projectId === 'unassigned' ? 0 : Number(analyticsFilters.projectId)
+      if (searchQuery.trim()) query.q = searchQuery.trim()
+
+      setAnalyticsLoading(true)
+      try {
+        const analytics = await api.analyticsOverview(query)
+        setAnalyticsOverview(analytics)
+      } catch (loadError) {
+        const message = loadError instanceof Error ? loadError.message : 'Unknown error while loading analytics'
+        setError(message)
+      } finally {
+        setAnalyticsLoading(false)
+      }
+    }
+
+    void loadFilteredAnalytics()
+  }, [analyticsFilters.priority, analyticsFilters.projectId, analyticsFilters.status, searchQuery])
 
   useEffect(() => {
     if (!currentUser) {
@@ -538,105 +563,6 @@ function App() {
     )
   }, [projectManagementOverview.gantt, searchQuery])
 
-  const filteredAnalyticsTasks = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase()
-    return data.tasks.filter((task) => {
-      const matchesQuery =
-        !query ||
-        `${task.title} ${task.status} ${task.priority} ${task.description ?? ''} ${task.project?.name ?? ''} ${task.assignee?.name ?? ''}`
-          .toLowerCase()
-          .includes(query)
-      const matchesStatus = analyticsFilters.status === 'all' || task.status === analyticsFilters.status
-      const matchesPriority = analyticsFilters.priority === 'all' || task.priority === analyticsFilters.priority
-      const matchesProject = analyticsFilters.projectId === 'all' || String(task.project_id ?? 'unassigned') === analyticsFilters.projectId
-      return matchesQuery && matchesStatus && matchesPriority && matchesProject
-    })
-  }, [analyticsFilters.priority, analyticsFilters.projectId, analyticsFilters.status, data.tasks, searchQuery])
-
-  const filteredAnalyticsSummary = useMemo(() => {
-    const totalTasks = filteredAnalyticsTasks.length
-    const completedTasks = filteredAnalyticsTasks.filter((task) => task.status === 'done').length
-    const inProgressTasks = filteredAnalyticsTasks.filter((task) => task.status === 'in_progress').length
-    const overdueTasks = filteredAnalyticsTasks.filter((task) => task.due_date && task.due_date < new Date().toISOString().slice(0, 10) && task.status !== 'done').length
-    const averageProgress = totalTasks > 0 ? Math.round(filteredAnalyticsTasks.reduce((sum, task) => sum + task.progress, 0) / totalTasks) : 0
-    const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
-
-    return {
-      total_tasks: totalTasks,
-      completed_tasks: completedTasks,
-      in_progress_tasks: inProgressTasks,
-      overdue_tasks: overdueTasks,
-      average_progress: averageProgress,
-      completion_rate: completionRate,
-    }
-  }, [filteredAnalyticsTasks])
-
-  const filteredAnalyticsStatusDistribution = useMemo(
-    () =>
-      taskStatusOptions.map((status) => ({
-        status,
-        label: analyticsOverview.status_distribution.find((entry) => entry.status === status)?.label ?? status.replace('_', ' '),
-        count: filteredAnalyticsTasks.filter((task) => task.status === status).length,
-      })),
-    [analyticsOverview.status_distribution, filteredAnalyticsTasks],
-  )
-
-  const filteredAnalyticsPriorityDistribution = useMemo(
-    () =>
-      taskPriorityOptions.map((priority) => ({
-        priority,
-        label: analyticsOverview.priority_distribution.find((entry) => entry.priority === priority)?.label ?? priority,
-        count: filteredAnalyticsTasks.filter((task) => task.priority === priority).length,
-      })),
-    [analyticsOverview.priority_distribution, filteredAnalyticsTasks],
-  )
-
-  const filteredAnalyticsProjectProgress = useMemo(() => {
-    const grouped = new Map<string, { project_id: number | null; project_name: string; total_tasks: number; completed_tasks: number; average_progress: number; completion_rate: number }>()
-
-    filteredAnalyticsTasks.forEach((task) => {
-      const key = String(task.project_id ?? 'unassigned')
-      const current = grouped.get(key) ?? {
-        project_id: task.project_id,
-        project_name: task.project?.name ?? 'Unassigned',
-        total_tasks: 0,
-        completed_tasks: 0,
-        average_progress: 0,
-        completion_rate: 0,
-      }
-      current.total_tasks += 1
-      current.completed_tasks += task.status === 'done' ? 1 : 0
-      current.average_progress += task.progress
-      grouped.set(key, current)
-    })
-
-    return Array.from(grouped.values()).map((entry) => ({
-      ...entry,
-      average_progress: entry.total_tasks > 0 ? Math.round(entry.average_progress / entry.total_tasks) : 0,
-      completion_rate: entry.total_tasks > 0 ? Math.round((entry.completed_tasks / entry.total_tasks) * 100) : 0,
-    }))
-  }, [filteredAnalyticsTasks])
-
-  const filteredAnalyticsTrendPoints = useMemo(() => {
-    if (filteredAnalyticsTasks.length === 0) return []
-
-    const trendMap = new Map<string, { date: string; created_tasks: number; completed_tasks: number }>()
-    filteredAnalyticsTasks.forEach((task) => {
-      const createdDate = task.created_at.slice(0, 10)
-      const createdEntry = trendMap.get(createdDate) ?? { date: createdDate, created_tasks: 0, completed_tasks: 0 }
-      createdEntry.created_tasks += 1
-      trendMap.set(createdDate, createdEntry)
-
-      if (task.status === 'done') {
-        const completedDate = task.updated_at.slice(0, 10)
-        const completedEntry = trendMap.get(completedDate) ?? { date: completedDate, created_tasks: 0, completed_tasks: 0 }
-        completedEntry.completed_tasks += 1
-        trendMap.set(completedDate, completedEntry)
-      }
-    })
-
-    return Array.from(trendMap.values()).sort((left, right) => left.date.localeCompare(right.date))
-  }, [filteredAnalyticsTasks])
 
   const isBusy = (action: string) => mutation.activeAction === action
 
@@ -1143,22 +1069,23 @@ function App() {
         </ResourceSection>}
 
         {activeTab === 'analytics' && (
-          <ResourceSection title="Analytics" items={filteredAnalyticsTasks.length} createEnabled={false}>
+          <ResourceSection title="Analytics" items={analyticsOverview.summary.total_tasks} createEnabled={false}>
             <div className="analytics-grid">
               <section className="task-panel">
                 <div className="section-heading compact-heading">
                   <div>
                     <h3>Filtered analytics summary</h3>
-                    <p>Live rollups based on the current analytics filters and search query.</p>
+                    <p>Authoritative server-side rollups based on the current analytics filters and search query.</p>
                   </div>
+                  {analyticsLoading && <p className="analytics-loading-label">Refreshing analytics…</p>}
                 </div>
                 <div className="stats-grid management-stats-grid">
-                  <article className="stat-card"><span>Total tasks</span><strong>{filteredAnalyticsSummary.total_tasks}</strong></article>
-                  <article className="stat-card"><span>Completed</span><strong>{filteredAnalyticsSummary.completed_tasks}</strong></article>
-                  <article className="stat-card"><span>In progress</span><strong>{filteredAnalyticsSummary.in_progress_tasks}</strong></article>
-                  <article className="stat-card"><span>Overdue</span><strong>{filteredAnalyticsSummary.overdue_tasks}</strong></article>
-                  <article className="stat-card"><span>Completion</span><strong>{filteredAnalyticsSummary.completion_rate}%</strong></article>
-                  <article className="stat-card"><span>Avg progress</span><strong>{filteredAnalyticsSummary.average_progress}%</strong></article>
+                  <article className="stat-card"><span>Total tasks</span><strong>{analyticsOverview.summary.total_tasks}</strong></article>
+                  <article className="stat-card"><span>Completed</span><strong>{analyticsOverview.summary.completed_tasks}</strong></article>
+                  <article className="stat-card"><span>In progress</span><strong>{analyticsOverview.summary.in_progress_tasks}</strong></article>
+                  <article className="stat-card"><span>Overdue</span><strong>{analyticsOverview.summary.overdue_tasks}</strong></article>
+                  <article className="stat-card"><span>Completion</span><strong>{analyticsOverview.summary.completion_rate}%</strong></article>
+                  <article className="stat-card"><span>Avg progress</span><strong>{analyticsOverview.summary.average_progress}%</strong></article>
                 </div>
               </section>
 
@@ -1170,11 +1097,11 @@ function App() {
                   </div>
                 </div>
                 <div className="distribution-list">
-                  {filteredAnalyticsStatusDistribution.map((entry) => (
+                  {analyticsOverview.status_distribution.map((entry) => (
                     <article className="distribution-card" key={`analytics-status-${entry.status}`}>
                       <div className="item-header"><h4>{entry.label}</h4><span className="badge">{entry.count}</span></div>
                       <div className="distribution-bar-track">
-                        <div className="distribution-bar-fill" style={{ width: `${filteredAnalyticsSummary.total_tasks > 0 ? (entry.count / filteredAnalyticsSummary.total_tasks) * 100 : 0}%` }} />
+                        <div className="distribution-bar-fill" style={{ width: `${analyticsOverview.summary.total_tasks > 0 ? (entry.count / analyticsOverview.summary.total_tasks) * 100 : 0}%` }} />
                       </div>
                     </article>
                   ))}
@@ -1189,11 +1116,11 @@ function App() {
                   </div>
                 </div>
                 <div className="distribution-list">
-                  {filteredAnalyticsPriorityDistribution.map((entry) => (
+                  {analyticsOverview.priority_distribution.map((entry) => (
                     <article className="distribution-card" key={`analytics-priority-${entry.priority}`}>
                       <div className="item-header"><h4>{entry.label}</h4><span className="badge accent">{entry.count}</span></div>
                       <div className="distribution-bar-track">
-                        <div className="distribution-bar-fill priority" style={{ width: `${filteredAnalyticsSummary.total_tasks > 0 ? (entry.count / filteredAnalyticsSummary.total_tasks) * 100 : 0}%` }} />
+                        <div className="distribution-bar-fill priority" style={{ width: `${analyticsOverview.summary.total_tasks > 0 ? (entry.count / analyticsOverview.summary.total_tasks) * 100 : 0}%` }} />
                       </div>
                     </article>
                   ))}
@@ -1208,9 +1135,9 @@ function App() {
                   </div>
                 </div>
                 <div className="trend-list">
-                  {filteredAnalyticsTrendPoints.length > 0 ? (
-                    filteredAnalyticsTrendPoints.map((point) => {
-                      const peak = Math.max(1, ...filteredAnalyticsTrendPoints.map((entry) => Math.max(entry.created_tasks, entry.completed_tasks)))
+                  {analyticsOverview.task_trends.length > 0 ? (
+                    analyticsOverview.task_trends.map((point) => {
+                      const peak = Math.max(1, ...analyticsOverview.task_trends.map((entry) => Math.max(entry.created_tasks, entry.completed_tasks)))
                       return (
                         <article className="trend-card" key={`analytics-trend-${point.date}`}>
                           <div className="item-header"><h4>{formatShortDate(point.date)}</h4><span className="badge">{point.created_tasks + point.completed_tasks} events</span></div>
@@ -1228,7 +1155,7 @@ function App() {
                       )
                     })
                   ) : (
-                    <EmptyState message="No trend data matches the current analytics filters." />
+                    <EmptyState message="No trend data matches the current server-side analytics filters." />
                   )}
                 </div>
               </section>
@@ -1241,8 +1168,8 @@ function App() {
                   </div>
                 </div>
                 <div className="resource-list">
-                  {filteredAnalyticsProjectProgress.length > 0 ? (
-                    filteredAnalyticsProjectProgress.map((entry) => (
+                  {analyticsOverview.project_progress.length > 0 ? (
+                    analyticsOverview.project_progress.map((entry) => (
                       <article className="item-card" key={`filtered-project-${entry.project_id ?? 'unassigned'}`}>
                         <div className="item-header"><h4>{entry.project_name}</h4><span className="badge">{entry.total_tasks} tasks</span></div>
                         <div className="task-meta-grid">
@@ -1254,7 +1181,7 @@ function App() {
                       </article>
                     ))
                   ) : (
-                    <EmptyState message="No projects match the current analytics filters." />
+                    <EmptyState message="No projects match the current server-side analytics filters." />
                   )}
                 </div>
               </section>

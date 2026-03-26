@@ -1,5 +1,6 @@
 import type {
   AnalyticsOverview,
+  AnalyticsQuery,
   AuthenticatedUser,
   Document,
   DocumentPayload,
@@ -41,6 +42,17 @@ export function storeToken(token: string) {
 
 export function clearStoredToken() {
   window.localStorage.removeItem(TOKEN_STORAGE_KEY)
+}
+
+function buildQueryString(params: Record<string, string | number | undefined>) {
+  const searchParams = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined) {
+      searchParams.set(key, String(value))
+    }
+  })
+  const queryString = searchParams.toString()
+  return queryString ? `?${queryString}` : ''
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -123,7 +135,15 @@ export const api = {
 
   tasks: () => request<ListResponse<Task>>('/tasks/'),
   projectManagementOverview: () => request<ProjectManagementOverview>('/project-management/overview'),
-  analyticsOverview: () => request<AnalyticsOverview>('/analytics/overview'),
+  analyticsOverview: (query: AnalyticsQuery = {}) =>
+    request<AnalyticsOverview>(
+      `/analytics/overview${buildQueryString({
+        status: query.status,
+        priority: query.priority,
+        project_id: query.project_id,
+        q: query.q,
+      })}`,
+    ),
   createTask: (payload: TaskPayload) => request<Task>('/tasks/', { method: 'POST', body: payload, auth: true }),
   updateTask: (id: number, payload: TaskPayload) => request<Task>(`/tasks/${id}`, { method: 'PUT', body: payload, auth: true }),
   deleteTask: (id: number) => request<void>(`/tasks/${id}`, { method: 'DELETE', auth: true }),

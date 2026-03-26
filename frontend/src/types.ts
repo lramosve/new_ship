@@ -220,3 +220,10 @@ export type AnalyticsOverview = {
   priority_distribution: PriorityDistribution[]
   project_progress: ProjectProgressSnapshot[]
 }
+
+export type AnalyticsQuery = {
+  status?: TaskStatus
+  priority?: TaskPriority
+  project_id?: number
+  q?: string
+}
