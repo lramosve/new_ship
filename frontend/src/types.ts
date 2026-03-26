@@ -96,3 +96,35 @@ export type PlanPayload = {
   description: string
   week_number: number
 }
+
+export type TaskStatus = 'todo' | 'in_progress' | 'in_review' | 'done'
+export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
+
+export type Task = {
+  id: number
+  title: string
+  description: string | null
+  status: TaskStatus
+  priority: TaskPriority
+  progress: number
+  start_date: string | null
+  due_date: string | null
+  project_id: number | null
+  assignee_id: number | null
+  created_at: string
+  updated_at: string
+  project: Project | null
+  assignee: User | null
+}
+
+export type TaskPayload = {
+  title: string
+  description: string | null
+  status: TaskStatus
+  priority: TaskPriority
+  progress: number
+  start_date: string | null
+  due_date: string | null
+  project_id: number | null
+  assignee_id: number | null
+}

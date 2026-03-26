@@ -11,6 +11,8 @@ import type {
   PlanPayload,
   Project,
   ProjectPayload,
+  Task,
+  TaskPayload,
   TokenResponse,
   User,
   UserCreatePayload,
@@ -116,4 +118,9 @@ export const api = {
   updatePlan: (id: number, payload: PlanPayload) =>
     request<Plan>(`/plans/${id}`, { method: 'PUT', body: payload, auth: true }),
   deletePlan: (id: number) => request<void>(`/plans/${id}`, { method: 'DELETE', auth: true }),
+
+  tasks: () => request<ListResponse<Task>>('/tasks/'),
+  createTask: (payload: TaskPayload) => request<Task>('/tasks/', { method: 'POST', body: payload, auth: true }),
+  updateTask: (id: number, payload: TaskPayload) => request<Task>(`/tasks/${id}`, { method: 'PUT', body: payload, auth: true }),
+  deleteTask: (id: number) => request<void>(`/tasks/${id}`, { method: 'DELETE', auth: true }),
 }

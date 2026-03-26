@@ -11,6 +11,10 @@ import type {
   Plan,
   Project,
   ProjectPayload,
+  Task,
+  TaskPayload,
+  TaskPriority,
+  TaskStatus,
   User,
   UserCreatePayload,
   UserUpdatePayload,
@@ -23,9 +27,10 @@ type DashboardData = {
   users: User[]
   issues: Issue[]
   plans: Plan[]
+  tasks: Task[]
 }
 
-type ResourceKey = 'projects' | 'documents' | 'users' | 'issues' | 'plans'
+type ResourceKey = 'projects' | 'documents' | 'users' | 'issues' | 'plans' | 'tasks'
 
 type EditingState = {
   projectId: number | null
@@ -33,6 +38,7 @@ type EditingState = {
   userId: number | null
   issueId: number | null
   planId: number | null
+  taskId: number | null
 }
 
 type MutationState = {
@@ -48,13 +54,29 @@ type TabOption = {
   label: string
 }
 
+type TaskFormState = {
+  title: string
+  description: string
+  status: TaskStatus
+  priority: TaskPriority
+  progress: string
+  start_date: string
+  due_date: string
+  project_id: string
+  assignee_id: string
+}
+
 const tabOptions: TabOption[] = [
   { key: 'projects', label: 'Projects' },
   { key: 'documents', label: 'Documents' },
   { key: 'users', label: 'Users' },
   { key: 'issues', label: 'Issues' },
   { key: 'plans', label: 'Plans' },
+  { key: 'tasks', label: 'Tasks' },
 ]
+
+const taskStatusOptions: TaskStatus[] = ['todo', 'in_progress', 'in_review', 'done']
+const taskPriorityOptions: TaskPriority[] = ['low', 'medium', 'high', 'urgent']
 
 const initialData: DashboardData = {
   health: null,
@@ -63,6 +85,7 @@ const initialData: DashboardData = {
   users: [],
   issues: [],
   plans: [],
+  tasks: [],
 }
 
 const initialEditingState: EditingState = {
@@ -71,6 +94,7 @@ const initialEditingState: EditingState = {
   userId: null,
   issueId: null,
   planId: null,
+  taskId: null,
 }
 
 const initialLoginForm: LoginPayload = {
@@ -112,8 +136,25 @@ const initialPlanForm = {
   week_number: '1',
 }
 
+const initialTaskForm: TaskFormState = {
+  title: '',
+  description: '',
+  status: 'todo',
+  priority: 'medium',
+  progress: '0',
+  start_date: '',
+  due_date: '',
+  project_id: '',
+  assignee_id: '',
+}
+
 function formatDate(value: string) {
   return new Date(value).toLocaleString()
+}
+
+function formatShortDate(value: string | null) {
+  if (!value) return '—'
+  return new Date(`${value}T00:00:00`).toLocaleDateString()
 }
 
 function normalizeText(value: string) {
@@ -122,6 +163,18 @@ function normalizeText(value: string) {
 
 function normalizeOptionalText(value: string | null | undefined) {
   const normalized = (value ?? '').trim()
+  return normalized.length > 0 ? normalized : null
+}
+
+function normalizeOptionalId(value: string) {
+  const normalized = value.trim()
+  if (!normalized) return null
+  const parsed = Number(normalized)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+function normalizeOptionalDate(value: string) {
+  const normalized = value.trim()
   return normalized.length > 0 ? normalized : null
 }
 
@@ -181,6 +234,53 @@ function validatePlan(payload: { description: string; week_number: string }): Va
   return errors
 }
 
+function validateTask(payload: TaskFormState): ValidationErrors {
+  const errors: ValidationErrors = {}
+  if (!normalizeText(payload.title)) errors.taskTitle = 'Task title is required.'
+  const progress = Number(payload.progress)
+  if (!Number.isInteger(progress) || progress < 0 || progress > 100) {
+    errors.taskProgress = 'Progress must be an integer between 0 and 100.'
+  }
+  if (payload.start_date && payload.due_date && payload.start_date > payload.due_date) {
+    errors.taskDateRange = 'Start date cannot be after due date.'
+  }
+  if (payload.project_id && normalizeOptionalId(payload.project_id) === null) {
+    errors.taskProjectId = 'Project selection is invalid.'
+  }
+  if (payload.assignee_id && normalizeOptionalId(payload.assignee_id) === null) {
+    errors.taskAssigneeId = 'Assignee selection is invalid.'
+  }
+  return errors
+}
+
+function buildTaskPayload(form: TaskFormState): TaskPayload {
+  return {
+    title: normalizeText(form.title),
+    description: normalizeOptionalText(form.description),
+    status: form.status,
+    priority: form.priority,
+    progress: Number(form.progress),
+    start_date: normalizeOptionalDate(form.start_date),
+    due_date: normalizeOptionalDate(form.due_date),
+    project_id: normalizeOptionalId(form.project_id),
+    assignee_id: normalizeOptionalId(form.assignee_id),
+  }
+}
+
+function taskToForm(task: Task): TaskFormState {
+  return {
+    title: task.title,
+    description: task.description ?? '',
+    status: task.status,
+    priority: task.priority,
+    progress: String(task.progress),
+    start_date: task.start_date ?? '',
+    due_date: task.due_date ?? '',
+    project_id: task.project_id ? String(task.project_id) : '',
+    assignee_id: task.assignee_id ? String(task.assignee_id) : '',
+  }
+}
+
 function App() {
   const [data, setData] = useState<DashboardData>(initialData)
   const [loading, setLoading] = useState(true)
@@ -203,19 +303,22 @@ function App() {
   const [issueEditForm, setIssueEditForm] = useState<IssuePayload>(initialIssueForm)
   const [planCreateForm, setPlanCreateForm] = useState(initialPlanForm)
   const [planEditForm, setPlanEditForm] = useState(initialPlanForm)
+  const [taskCreateForm, setTaskCreateForm] = useState<TaskFormState>(initialTaskForm)
+  const [taskEditForm, setTaskEditForm] = useState<TaskFormState>(initialTaskForm)
 
   const loadDashboard = async () => {
     try {
       setLoading(true)
       setError(null)
 
-      const [health, projects, documents, users, issues, plans] = await Promise.all([
+      const [health, projects, documents, users, issues, plans, tasks] = await Promise.all([
         api.health(),
         api.projects(),
         api.documents(),
         api.users(),
         api.issues(),
         api.plans(),
+        api.tasks(),
       ])
 
       setData({
@@ -225,6 +328,7 @@ function App() {
         users: users.items,
         issues: issues.items,
         plans: plans.items,
+        tasks: tasks.items,
       })
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : 'Unknown error while loading dashboard'
@@ -260,6 +364,7 @@ function App() {
       { label: 'Users', value: data.users.length },
       { label: 'Issues', value: data.issues.length },
       { label: 'Plans', value: data.plans.length },
+      { label: 'Tasks', value: data.tasks.length },
     ],
     [data],
   )
@@ -288,6 +393,57 @@ function App() {
     const query = searchQuery.trim().toLowerCase()
     return data.plans.filter((plan) => !query || `week ${plan.week_number} ${plan.description}`.toLowerCase().includes(query))
   }, [data.plans, searchQuery])
+
+  const filteredTasks = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    return data.tasks.filter(
+      (task) =>
+        !query ||
+        `${task.title} ${task.status} ${task.priority} ${task.description ?? ''} ${task.project?.name ?? ''} ${task.assignee?.name ?? ''}`
+          .toLowerCase()
+          .includes(query),
+    )
+  }, [data.tasks, searchQuery])
+
+  const kanbanColumns = useMemo(
+    () =>
+      taskStatusOptions.map((status) => ({
+        status,
+        tasks: filteredTasks.filter((task) => task.status === status),
+      })),
+    [filteredTasks],
+  )
+
+  const ganttTasks = useMemo(() => {
+    const scheduled = filteredTasks.filter((task) => task.start_date && task.due_date)
+    if (scheduled.length === 0) return []
+
+    const dayMs = 1000 * 60 * 60 * 24
+    const starts = scheduled.map((task) => new Date(`${task.start_date}T00:00:00`).getTime())
+    const ends = scheduled.map((task) => new Date(`${task.due_date}T00:00:00`).getTime())
+    const minStart = Math.min(...starts)
+    const maxEnd = Math.max(...ends)
+    const totalDays = Math.max(1, Math.round((maxEnd - minStart) / dayMs) + 1)
+
+    return scheduled
+      .slice()
+      .sort((left, right) => {
+        const leftStart = new Date(`${left.start_date}T00:00:00`).getTime()
+        const rightStart = new Date(`${right.start_date}T00:00:00`).getTime()
+        return leftStart - rightStart
+      })
+      .map((task) => {
+        const taskStart = new Date(`${task.start_date}T00:00:00`).getTime()
+        const taskEnd = new Date(`${task.due_date}T00:00:00`).getTime()
+        const offsetDays = Math.round((taskStart - minStart) / dayMs)
+        const durationDays = Math.max(1, Math.round((taskEnd - taskStart) / dayMs) + 1)
+        return {
+          task,
+          offsetPercent: (offsetDays / totalDays) * 100,
+          widthPercent: (durationDays / totalDays) * 100,
+        }
+      })
+  }, [filteredTasks])
 
   const isBusy = (action: string) => mutation.activeAction === action
 
@@ -569,13 +725,65 @@ function App() {
     }
   }
 
+  const handleCreateTask = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const errors = validateTask(taskCreateForm)
+    if (Object.keys(errors).length > 0) return applyValidation(errors)
+    beginMutation('create-task')
+    try {
+      const created = await api.createTask(buildTaskPayload(taskCreateForm))
+      setData((current) => ({ ...current, tasks: [created, ...current.tasks] }))
+      setTaskCreateForm(initialTaskForm)
+      completeMutation('Task created.')
+    } catch (mutationError) {
+      failMutation(mutationError)
+    }
+  }
+
+  const handleUpdateTask = async (taskId: number) => {
+    const errors = validateTask(taskEditForm)
+    if (Object.keys(errors).length > 0) return applyValidation(errors)
+    beginMutation(`update-task-${taskId}`)
+    try {
+      const updated = await api.updateTask(taskId, buildTaskPayload(taskEditForm))
+      setData((current) => ({ ...current, tasks: current.tasks.map((task) => (task.id === taskId ? updated : task)) }))
+      setEditing((current) => ({ ...current, taskId: null }))
+      completeMutation('Task updated.')
+    } catch (mutationError) {
+      failMutation(mutationError)
+    }
+  }
+
+  const handleDeleteTask = async (taskId: number) => {
+    beginMutation(`delete-task-${taskId}`)
+    try {
+      await api.deleteTask(taskId)
+      setData((current) => ({ ...current, tasks: current.tasks.filter((task) => task.id !== taskId) }))
+      completeMutation('Task deleted.')
+    } catch (mutationError) {
+      failMutation(mutationError)
+    }
+  }
+
+  const moveTaskToStatus = async (task: Task, status: TaskStatus) => {
+    if (task.status === status) return
+    beginMutation(`move-task-${task.id}-${status}`)
+    try {
+      const updated = await api.updateTask(task.id, { ...buildTaskPayload(taskToForm(task)), status })
+      setData((current) => ({ ...current, tasks: current.tasks.map((item) => (item.id === task.id ? updated : item)) }))
+      completeMutation(`Task moved to ${status.replace('_', ' ')}.`)
+    } catch (mutationError) {
+      failMutation(mutationError)
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="hero">
         <div>
           <p className="eyebrow">React frontend</p>
           <h1>Ship Dashboard</h1>
-          <p className="hero-copy">Authenticated, validated CRUD workflows against the FastAPI backend with list metadata and protected mutations.</p>
+          <p className="hero-copy">Authenticated CRUD plus project delivery views for tasks, Kanban workflow, assignment, and Gantt-style scheduling.</p>
         </div>
         <div className="status-card">
           <span className={`status-dot ${data.health ? 'online' : 'offline'}`} />
@@ -592,7 +800,7 @@ function App() {
           <div className="section-heading">
             <div>
               <h2>Sign in</h2>
-              <p>Protected create, edit, and delete actions require a valid account session.</p>
+              <p>Protected create, edit, delete, assignment, and workflow actions require a valid account session.</p>
             </div>
           </div>
           <form className="crud-form" onSubmit={handleLogin}>
@@ -708,6 +916,117 @@ function App() {
           ))}
           {filteredPlans.length === 0 && <EmptyState message="No plans match the current filter." />}
         </ResourceSection>}
+
+        {activeTab === 'tasks' && (
+          <ResourceSection title="Tasks" items={filteredTasks.length} createEnabled={Boolean(currentUser)}>
+            {currentUser && (
+              <TaskCreateForm
+                form={taskCreateForm}
+                setForm={setTaskCreateForm}
+                onSubmit={handleCreateTask}
+                busy={isBusy('create-task')}
+                errors={validationErrors}
+                projects={data.projects}
+                users={data.users}
+              />
+            )}
+
+            <div className="task-overview-grid">
+              <section className="task-panel">
+                <div className="section-heading compact-heading">
+                  <div>
+                    <h3>Kanban board</h3>
+                    <p>Workflow by status with one-click movement between columns.</p>
+                  </div>
+                </div>
+                <div className="kanban-grid">
+                  {kanbanColumns.map((column) => (
+                    <div className="kanban-column" key={column.status}>
+                      <div className="kanban-column-header">
+                        <h4>{column.status.replace('_', ' ')}</h4>
+                        <span className="badge">{column.tasks.length}</span>
+                      </div>
+                      <div className="kanban-column-body">
+                        {column.tasks.map((task) => (
+                          <article className="kanban-card" key={`kanban-${task.id}`}>
+                            <div className="item-header"><h4>{task.title}</h4><span className="badge accent">{task.priority}</span></div>
+                            <p>{task.description || 'No description provided.'}</p>
+                            <div className="task-meta-grid">
+                              <small>Assignee: {task.assignee?.name ?? 'Unassigned'}</small>
+                              <small>Project: {task.project?.name ?? 'No project'}</small>
+                              <small>Progress: {task.progress}%</small>
+                              <small>Due: {formatShortDate(task.due_date)}</small>
+                            </div>
+                            {currentUser && (
+                              <div className="item-actions">
+                                {taskStatusOptions.filter((status) => status !== task.status).map((status) => (
+                                  <button key={status} type="button" className="secondary micro-button" onClick={() => void moveTaskToStatus(task, status)}>
+                                    {status.replace('_', ' ')}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </article>
+                        ))}
+                        {column.tasks.length === 0 && <EmptyState message="No tasks in this column." />}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="task-panel">
+                <div className="section-heading compact-heading">
+                  <div>
+                    <h3>Gantt timeline</h3>
+                    <p>Scheduled tasks plotted from start date to due date with progress overlays.</p>
+                  </div>
+                </div>
+                {ganttTasks.length > 0 ? (
+                  <div className="gantt-list">
+                    {ganttTasks.map(({ task, offsetPercent, widthPercent }) => (
+                      <div className="gantt-row" key={`gantt-${task.id}`}>
+                        <div className="gantt-task-label">
+                          <strong>{task.title}</strong>
+                          <small>{task.project?.name ?? 'No project'} · {task.assignee?.name ?? 'Unassigned'}</small>
+                        </div>
+                        <div className="gantt-track">
+                          <div className="gantt-bar" style={{ left: `${offsetPercent}%`, width: `${Math.max(widthPercent, 8)}%` }}>
+                            <div className="gantt-progress" style={{ width: `${task.progress}%` }} />
+                            <span>{formatShortDate(task.start_date)} → {formatShortDate(task.due_date)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState message="Add start and due dates to tasks to populate the timeline." />
+                )}
+              </section>
+            </div>
+
+            <div className="resource-list">
+              {filteredTasks.map((task) => (
+                <article className="item-card" key={task.id}>
+                  <div className="item-header"><h3>{task.title}</h3><span className="badge accent">{task.status}</span></div>
+                  <p>{task.description || 'No description provided.'}</p>
+                  <div className="task-meta-grid">
+                    <small>Priority: {task.priority}</small>
+                    <small>Progress: {task.progress}%</small>
+                    <small>Project: {task.project?.name ?? 'No project linked'}</small>
+                    <small>Assignee: {task.assignee?.name ?? 'Unassigned'}</small>
+                    <small>Start: {formatShortDate(task.start_date)}</small>
+                    <small>Due: {formatShortDate(task.due_date)}</small>
+                  </div>
+                  <small>Updated {formatDate(task.updated_at)}</small>
+                  {currentUser && <div className="item-actions"><button type="button" className="secondary" onClick={() => { setEditing((current) => ({ ...current, taskId: task.id })); setTaskEditForm(taskToForm(task)) }}>Edit</button><button type="button" className="danger" onClick={() => void handleDeleteTask(task.id)}>Delete</button></div>}
+                  {editing.taskId === task.id && currentUser && <InlineTaskEdit form={taskEditForm} setForm={setTaskEditForm} onSave={() => void handleUpdateTask(task.id)} onCancel={() => setEditing((current) => ({ ...current, taskId: null }))} busy={isBusy(`update-task-${task.id}`)} errors={validationErrors} projects={data.projects} users={data.users} />}
+                </article>
+              ))}
+              {filteredTasks.length === 0 && <EmptyState message="No tasks match the current filter." />}
+            </div>
+          </ResourceSection>
+        )}
       </section>
     </div>
   )
@@ -728,6 +1047,9 @@ function IssueCreateForm({ form, setForm, onSubmit, busy, errors }: { form: Issu
 function InlineIssueEdit({ form, setForm, onSave, onCancel, busy }: { form: IssuePayload; setForm: React.Dispatch<React.SetStateAction<IssuePayload>>; onSave: () => void; onCancel: () => void; busy: boolean }) { return <div className="editable-card"><div className="form-grid compact"><label><span>Title</span><input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} /></label><label><span>Status</span><select value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as Issue['status'] }))}><option value="open">open</option><option value="in_progress">in_progress</option><option value="blocked">blocked</option><option value="closed">closed</option></select></label><label className="full-width"><span>Description</span><textarea value={form.description ?? ''} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></label></div><div className="item-actions"><button type="button" onClick={onSave} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button><button type="button" className="secondary" onClick={onCancel}>Cancel</button></div></div> }
 function PlanCreateForm({ form, setForm, onSubmit, busy, errors }: { form: { description: string; week_number: string }; setForm: React.Dispatch<React.SetStateAction<{ description: string; week_number: string }>>; onSubmit: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; busy: boolean; errors: ValidationErrors }) { return <form className="crud-form" onSubmit={(event) => void onSubmit(event)}><div className="form-grid"><label><span>Week number</span><input type="number" min="1" max="53" value={form.week_number} onChange={(event) => setForm((current) => ({ ...current, week_number: event.target.value }))} />{errors.planWeekNumber && <small className="field-error">{errors.planWeekNumber}</small>}</label><label className="full-width"><span>Description</span><textarea value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />{errors.planDescription && <small className="field-error">{errors.planDescription}</small>}</label></div><div className="form-actions"><button type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create plan'}</button></div></form> }
 function InlinePlanEdit({ form, setForm, onSave, onCancel, busy }: { form: { description: string; week_number: string }; setForm: React.Dispatch<React.SetStateAction<{ description: string; week_number: string }>>; onSave: () => void; onCancel: () => void; busy: boolean }) { return <div className="editable-card"><div className="form-grid compact"><label><span>Week number</span><input type="number" min="1" max="53" value={form.week_number} onChange={(event) => setForm((current) => ({ ...current, week_number: event.target.value }))} /></label><label className="full-width"><span>Description</span><textarea value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></label></div><div className="item-actions"><button type="button" onClick={onSave} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button><button type="button" className="secondary" onClick={onCancel}>Cancel</button></div></div> }
+function TaskCreateForm({ form, setForm, onSubmit, busy, errors, projects, users }: { form: TaskFormState; setForm: React.Dispatch<React.SetStateAction<TaskFormState>>; onSubmit: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; busy: boolean; errors: ValidationErrors; projects: Project[]; users: User[] }) { return <form className="crud-form" onSubmit={(event) => void onSubmit(event)}><TaskFormFields form={form} setForm={setForm} errors={errors} projects={projects} users={users} /><div className="form-actions"><button type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create task'}</button></div></form> }
+function InlineTaskEdit({ form, setForm, onSave, onCancel, busy, errors, projects, users }: { form: TaskFormState; setForm: React.Dispatch<React.SetStateAction<TaskFormState>>; onSave: () => void; onCancel: () => void; busy: boolean; errors: ValidationErrors; projects: Project[]; users: User[] }) { return <div className="editable-card"><TaskFormFields form={form} setForm={setForm} errors={errors} projects={projects} users={users} compact /><div className="item-actions"><button type="button" onClick={onSave} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button><button type="button" className="secondary" onClick={onCancel}>Cancel</button></div></div> }
+function TaskFormFields({ form, setForm, errors, projects, users, compact = false }: { form: TaskFormState; setForm: React.Dispatch<React.SetStateAction<TaskFormState>>; errors: ValidationErrors; projects: Project[]; users: User[]; compact?: boolean }) { return <div className={`form-grid ${compact ? 'compact' : ''}`}><label><span>Title</span><input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} />{errors.taskTitle && <small className="field-error">{errors.taskTitle}</small>}</label><label><span>Status</span><select value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as TaskStatus }))}>{taskStatusOptions.map((status) => <option key={status} value={status}>{status}</option>)}</select></label><label><span>Priority</span><select value={form.priority} onChange={(event) => setForm((current) => ({ ...current, priority: event.target.value as TaskPriority }))}>{taskPriorityOptions.map((priority) => <option key={priority} value={priority}>{priority}</option>)}</select></label><label><span>Progress %</span><input type="number" min="0" max="100" value={form.progress} onChange={(event) => setForm((current) => ({ ...current, progress: event.target.value }))} />{errors.taskProgress && <small className="field-error">{errors.taskProgress}</small>}</label><label><span>Project</span><select value={form.project_id} onChange={(event) => setForm((current) => ({ ...current, project_id: event.target.value }))}><option value="">No project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select>{errors.taskProjectId && <small className="field-error">{errors.taskProjectId}</small>}</label><label><span>Assignee</span><select value={form.assignee_id} onChange={(event) => setForm((current) => ({ ...current, assignee_id: event.target.value }))}><option value="">Unassigned</option>{users.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}</select>{errors.taskAssigneeId && <small className="field-error">{errors.taskAssigneeId}</small>}</label><label><span>Start date</span><input type="date" value={form.start_date} onChange={(event) => setForm((current) => ({ ...current, start_date: event.target.value }))} /></label><label><span>Due date</span><input type="date" value={form.due_date} onChange={(event) => setForm((current) => ({ ...current, due_date: event.target.value }))} />{errors.taskDateRange && <small className="field-error">{errors.taskDateRange}</small>}</label><label className="full-width"><span>Description</span><textarea value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></label></div> }
 function EmptyState({ message }: { message: string }) { return <div className="empty-state">{message}</div> }
 
 export default App
