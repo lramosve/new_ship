@@ -1,6 +1,7 @@
+from datetime import date
 from typing import Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session, joinedload
 
 from app import schemas
@@ -77,16 +78,32 @@ def create_task(
 
 
 @router.get('/tasks/', response_model=schemas.TaskList)
-def read_tasks(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    total = db.query(TaskModel).count()
-    tasks: List[TaskModel] = (
-        db.query(TaskModel)
-        .options(joinedload(TaskModel.project), joinedload(TaskModel.assignee))
-        .order_by(TaskModel.id.desc())
-        .offset(skip)
-        .limit(limit)
-        .all()
-    )
+def read_tasks(
+    skip: int = 0,
+    limit: int = 100,
+    status: schemas.TaskStatus | None = Query(default=None),
+    project_id: int | None = Query(default=None, ge=1),
+    assignee_id: int | None = Query(default=None, ge=1),
+    overdue_only: bool = False,
+    scheduled_only: bool = False,
+    db: Session = Depends(get_db),
+):
+    query = db.query(TaskModel).options(joinedload(TaskModel.project), joinedload(TaskModel.assignee))
+
+    if status is not None:
+        query = query.filter(TaskModel.status == status)
+    if project_id is not None:
+        query = query.filter(TaskModel.project_id == project_id)
+    if assignee_id is not None:
+        query = query.filter(TaskModel.assignee_id == assignee_id)
+    if overdue_only:
+        today = date.today()
+        query = query.filter(TaskModel.due_date.is_not(None), TaskModel.due_date < today, TaskModel.status != 'done')
+    if scheduled_only:
+        query = query.filter(TaskModel.start_date.is_not(None), TaskModel.due_date.is_not(None))
+
+    total = query.count()
+    tasks: List[TaskModel] = query.order_by(TaskModel.id.desc()).offset(skip).limit(limit).all()
     return {'items': [serialize_task(task) for task in tasks], 'total': total}
 
 

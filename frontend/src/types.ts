@@ -128,3 +128,51 @@ export type TaskPayload = {
   project_id: number | null
   assignee_id: number | null
 }
+
+export type KanbanColumn = {
+  status: TaskStatus
+  label: string
+  count: number
+  tasks: Task[]
+}
+
+export type GanttTask = {
+  task: Task
+  start_date: string
+  due_date: string
+  duration_days: number
+  offset_days: number
+}
+
+export type AssignmentSummary = {
+  assignee_id: number | null
+  assignee_name: string
+  total_tasks: number
+  todo_tasks: number
+  in_progress_tasks: number
+  completed_tasks: number
+  avg_progress: number
+}
+
+export type TimelineBounds = {
+  start_date: string | null
+  end_date: string | null
+  total_days: number
+}
+
+export type ProjectManagementSummary = {
+  total_projects: number
+  total_tasks: number
+  unassigned_tasks: number
+  overdue_tasks: number
+  completed_tasks: number
+  completion_rate: number
+}
+
+export type ProjectManagementOverview = {
+  summary: ProjectManagementSummary
+  kanban: KanbanColumn[]
+  gantt: GanttTask[]
+  assignment_workload: AssignmentSummary[]
+  timeline: TimelineBounds
+}

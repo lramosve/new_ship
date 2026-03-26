@@ -10,6 +10,7 @@ import type {
   LoginPayload,
   Plan,
   Project,
+  ProjectManagementOverview,
   ProjectPayload,
   Task,
   TaskPayload,
@@ -95,6 +96,25 @@ const initialEditingState: EditingState = {
   issueId: null,
   planId: null,
   taskId: null,
+}
+
+const initialProjectManagementOverview: ProjectManagementOverview = {
+  summary: {
+    total_projects: 0,
+    total_tasks: 0,
+    unassigned_tasks: 0,
+    overdue_tasks: 0,
+    completed_tasks: 0,
+    completion_rate: 0,
+  },
+  kanban: [],
+  gantt: [],
+  assignment_workload: [],
+  timeline: {
+    start_date: null,
+    end_date: null,
+    total_days: 0,
+  },
 }
 
 const initialLoginForm: LoginPayload = {
@@ -305,13 +325,14 @@ function App() {
   const [planEditForm, setPlanEditForm] = useState(initialPlanForm)
   const [taskCreateForm, setTaskCreateForm] = useState<TaskFormState>(initialTaskForm)
   const [taskEditForm, setTaskEditForm] = useState<TaskFormState>(initialTaskForm)
+  const [projectManagementOverview, setProjectManagementOverview] = useState<ProjectManagementOverview>(initialProjectManagementOverview)
 
   const loadDashboard = async () => {
     try {
       setLoading(true)
       setError(null)
 
-      const [health, projects, documents, users, issues, plans, tasks] = await Promise.all([
+      const [health, projects, documents, users, issues, plans, tasks, overview] = await Promise.all([
         api.health(),
         api.projects(),
         api.documents(),
@@ -319,6 +340,7 @@ function App() {
         api.issues(),
         api.plans(),
         api.tasks(),
+        api.projectManagementOverview(),
       ])
 
       setData({
@@ -330,6 +352,7 @@ function App() {
         plans: plans.items,
         tasks: tasks.items,
       })
+      setProjectManagementOverview(overview)
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : 'Unknown error while loading dashboard'
       setError(message)
@@ -407,43 +430,29 @@ function App() {
 
   const kanbanColumns = useMemo(
     () =>
-      taskStatusOptions.map((status) => ({
-        status,
-        tasks: filteredTasks.filter((task) => task.status === status),
+      projectManagementOverview.kanban.map((column) => ({
+        ...column,
+        tasks: column.tasks.filter(
+          (task) =>
+            !searchQuery.trim() ||
+            `${task.title} ${task.status} ${task.priority} ${task.description ?? ''} ${task.project?.name ?? ''} ${task.assignee?.name ?? ''}`
+              .toLowerCase()
+              .includes(searchQuery.trim().toLowerCase()),
+        ),
       })),
-    [filteredTasks],
+    [projectManagementOverview.kanban, searchQuery],
   )
 
   const ganttTasks = useMemo(() => {
-    const scheduled = filteredTasks.filter((task) => task.start_date && task.due_date)
-    if (scheduled.length === 0) return []
-
-    const dayMs = 1000 * 60 * 60 * 24
-    const starts = scheduled.map((task) => new Date(`${task.start_date}T00:00:00`).getTime())
-    const ends = scheduled.map((task) => new Date(`${task.due_date}T00:00:00`).getTime())
-    const minStart = Math.min(...starts)
-    const maxEnd = Math.max(...ends)
-    const totalDays = Math.max(1, Math.round((maxEnd - minStart) / dayMs) + 1)
-
-    return scheduled
-      .slice()
-      .sort((left, right) => {
-        const leftStart = new Date(`${left.start_date}T00:00:00`).getTime()
-        const rightStart = new Date(`${right.start_date}T00:00:00`).getTime()
-        return leftStart - rightStart
-      })
-      .map((task) => {
-        const taskStart = new Date(`${task.start_date}T00:00:00`).getTime()
-        const taskEnd = new Date(`${task.due_date}T00:00:00`).getTime()
-        const offsetDays = Math.round((taskStart - minStart) / dayMs)
-        const durationDays = Math.max(1, Math.round((taskEnd - taskStart) / dayMs) + 1)
-        return {
-          task,
-          offsetPercent: (offsetDays / totalDays) * 100,
-          widthPercent: (durationDays / totalDays) * 100,
-        }
-      })
-  }, [filteredTasks])
+    const query = searchQuery.trim().toLowerCase()
+    return projectManagementOverview.gantt.filter(
+      ({ task }) =>
+        !query ||
+        `${task.title} ${task.status} ${task.priority} ${task.description ?? ''} ${task.project?.name ?? ''} ${task.assignee?.name ?? ''}`
+          .toLowerCase()
+          .includes(query),
+    )
+  }, [projectManagementOverview.gantt, searchQuery])
 
   const isBusy = (action: string) => mutation.activeAction === action
 
@@ -935,6 +944,58 @@ function App() {
               <section className="task-panel">
                 <div className="section-heading compact-heading">
                   <div>
+                    <h3>Delivery summary</h3>
+                    <p>Server-calculated workload, completion, overdue, and assignment metrics.</p>
+                  </div>
+                </div>
+                <div className="stats-grid management-stats-grid">
+                  <article className="stat-card">
+                    <span>Managed projects</span>
+                    <strong>{projectManagementOverview.summary.total_projects}</strong>
+                  </article>
+                  <article className="stat-card">
+                    <span>Total tasks</span>
+                    <strong>{projectManagementOverview.summary.total_tasks}</strong>
+                  </article>
+                  <article className="stat-card">
+                    <span>Completed</span>
+                    <strong>{projectManagementOverview.summary.completed_tasks}</strong>
+                  </article>
+                  <article className="stat-card">
+                    <span>Completion rate</span>
+                    <strong>{projectManagementOverview.summary.completion_rate}%</strong>
+                  </article>
+                  <article className="stat-card">
+                    <span>Unassigned</span>
+                    <strong>{projectManagementOverview.summary.unassigned_tasks}</strong>
+                  </article>
+                  <article className="stat-card">
+                    <span>Overdue</span>
+                    <strong>{projectManagementOverview.summary.overdue_tasks}</strong>
+                  </article>
+                </div>
+                <div className="resource-list">
+                  {projectManagementOverview.assignment_workload.length > 0 ? (
+                    projectManagementOverview.assignment_workload.map((entry) => (
+                      <article className="item-card" key={`workload-${entry.assignee_id ?? 'unassigned'}`}>
+                        <div className="item-header"><h4>{entry.assignee_name}</h4><span className="badge">{entry.total_tasks} tasks</span></div>
+                        <div className="task-meta-grid">
+                          <small>To do: {entry.todo_tasks}</small>
+                          <small>Active: {entry.in_progress_tasks}</small>
+                          <small>Completed: {entry.completed_tasks}</small>
+                          <small>Average progress: {entry.avg_progress}%</small>
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <EmptyState message="Create tasks to populate assignment workload insights." />
+                  )}
+                </div>
+              </section>
+
+              <section className="task-panel">
+                <div className="section-heading compact-heading">
+                  <div>
                     <h3>Kanban board</h3>
                     <p>Workflow by status with one-click movement between columns.</p>
                   </div>
@@ -943,7 +1004,7 @@ function App() {
                   {kanbanColumns.map((column) => (
                     <div className="kanban-column" key={column.status}>
                       <div className="kanban-column-header">
-                        <h4>{column.status.replace('_', ' ')}</h4>
+                        <h4>{column.label}</h4>
                         <span className="badge">{column.tasks.length}</span>
                       </div>
                       <div className="kanban-column-body">
@@ -979,25 +1040,34 @@ function App() {
                 <div className="section-heading compact-heading">
                   <div>
                     <h3>Gantt timeline</h3>
-                    <p>Scheduled tasks plotted from start date to due date with progress overlays.</p>
+                    <p>
+                      {projectManagementOverview.timeline.start_date && projectManagementOverview.timeline.end_date
+                        ? `Timeline spans ${formatShortDate(projectManagementOverview.timeline.start_date)} to ${formatShortDate(projectManagementOverview.timeline.end_date)}.`
+                        : 'Scheduled tasks appear here when both start and due dates are set.'}
+                    </p>
                   </div>
                 </div>
                 {ganttTasks.length > 0 ? (
                   <div className="gantt-list">
-                    {ganttTasks.map(({ task, offsetPercent, widthPercent }) => (
-                      <div className="gantt-row" key={`gantt-${task.id}`}>
-                        <div className="gantt-task-label">
-                          <strong>{task.title}</strong>
-                          <small>{task.project?.name ?? 'No project'} · {task.assignee?.name ?? 'Unassigned'}</small>
-                        </div>
-                        <div className="gantt-track">
-                          <div className="gantt-bar" style={{ left: `${offsetPercent}%`, width: `${Math.max(widthPercent, 8)}%` }}>
-                            <div className="gantt-progress" style={{ width: `${task.progress}%` }} />
-                            <span>{formatShortDate(task.start_date)} → {formatShortDate(task.due_date)}</span>
+                    {ganttTasks.map(({ task, offset_days, duration_days }) => {
+                      const totalDays = Math.max(projectManagementOverview.timeline.total_days, 1)
+                      const offsetPercent = (offset_days / totalDays) * 100
+                      const widthPercent = (duration_days / totalDays) * 100
+                      return (
+                        <div className="gantt-row" key={`gantt-${task.id}`}>
+                          <div className="gantt-task-label">
+                            <strong>{task.title}</strong>
+                            <small>{task.project?.name ?? 'No project'} · {task.assignee?.name ?? 'Unassigned'}</small>
+                          </div>
+                          <div className="gantt-track">
+                            <div className="gantt-bar" style={{ left: `${offsetPercent}%`, width: `${Math.max(widthPercent, 8)}%` }}>
+                              <div className="gantt-progress" style={{ width: `${task.progress}%` }} />
+                              <span>{formatShortDate(task.start_date)} → {formatShortDate(task.due_date)}</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : (
                   <EmptyState message="Add start and due dates to tasks to populate the timeline." />

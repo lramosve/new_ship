@@ -10,6 +10,7 @@ import type {
   Plan,
   PlanPayload,
   Project,
+  ProjectManagementOverview,
   ProjectPayload,
   Task,
   TaskPayload,
@@ -120,6 +121,7 @@ export const api = {
   deletePlan: (id: number) => request<void>(`/plans/${id}`, { method: 'DELETE', auth: true }),
 
   tasks: () => request<ListResponse<Task>>('/tasks/'),
+  projectManagementOverview: () => request<ProjectManagementOverview>('/project-management/overview'),
   createTask: (payload: TaskPayload) => request<Task>('/tasks/', { method: 'POST', body: payload, auth: true }),
   updateTask: (id: number, payload: TaskPayload) => request<Task>(`/tasks/${id}`, { method: 'PUT', body: payload, auth: true }),
   deleteTask: (id: number) => request<void>(`/tasks/${id}`, { method: 'DELETE', auth: true }),

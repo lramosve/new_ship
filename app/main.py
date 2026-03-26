@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import auth, document, issue, plan, project, task, user
+from app.routers import auth, document, issue, plan, project, project_management, task, user
 
 # Enhanced Logging Setup
 logging.basicConfig(level=logging.DEBUG)
@@ -33,6 +33,7 @@ app.include_router(user.router)
 app.include_router(issue.router)
 app.include_router(plan.router)
 app.include_router(task.router)
+app.include_router(project_management.router)
 
 
 @app.get('/health')
