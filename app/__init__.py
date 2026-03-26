@@ -1,0 +1,1 @@
+# This file allows the app directory to be recognized as a package.

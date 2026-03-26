@@ -1,19 +1,22 @@
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base as orm_declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 
-# Load environment variables
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://user:password@localhost/dbname')
+# Load environment variables - default to SQLite for development
+DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./ship_db.db')
 
-# Create the engine
-engine = create_engine(DATABASE_URL)
+# Create the engine - add special handling for SQLite
+engine_kwargs = {}
+if DATABASE_URL.startswith('sqlite'):
+    engine_kwargs['connect_args'] = {'check_same_thread': False}
+engine = create_engine(DATABASE_URL, **engine_kwargs)
 
 # Create the session local class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Base class for models
-tBase = declarative_base()
+Base = orm_declarative_base()
 
 # Dependency
 def get_db():

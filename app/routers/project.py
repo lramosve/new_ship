@@ -1,15 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
+import logging
 
 from app import schemas, models
 from app.db import get_db
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.post("/projects/", response_model=schemas.Project)
 def create_project(project: schemas.ProjectCreate, db: Session = Depends(get_db)):
     db_project = models.Project(name=project.name, description=project.description)
+    logger.info(f'DEBUG: Creating project with data: {project}')
     db.add(db_project)
     db.commit()
     db.refresh(db_project)

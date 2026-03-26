@@ -1,0 +1,4 @@
+INFO:     Will watch for changes in these directories: ['C:\\Users\\lramo\\Documents\\GauntletAI\\Repo\\new_ship']
+INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
+INFO:     Started reloader process [14780] using WatchFiles
+WARNING:  WatchFiles detected changes in 'test_connection.py'. Reloading...
