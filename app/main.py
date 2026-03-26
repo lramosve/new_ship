@@ -6,12 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.settings import settings
 from app.routers import analytics, auth, document, issue, plan, project, project_management, realtime, task, user
 
-# Enhanced Logging Setup
-logging.basicConfig(level=logging.DEBUG)
-logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+logging.basicConfig(level=getattr(logging, settings.log_level))
+logging.getLogger('sqlalchemy.engine').setLevel(getattr(logging, settings.sqlalchemy_log_level))
 logger = logging.getLogger('uvicorn.error')
 
-app = FastAPI()
+app = FastAPI(debug=settings.debug)
 
 app.add_middleware(
     CORSMiddleware,
