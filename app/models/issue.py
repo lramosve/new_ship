@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from app.core.security import utc_now
 from app.db import Base
 
 
@@ -11,8 +11,8 @@ class Issue(Base):
     title = Column(String, index=True)
     description = Column(String, index=True, nullable=True)
     status = Column(String, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
     # Foreign key to Document
     document_id = Column(Integer, ForeignKey("documents.id"), nullable=True)

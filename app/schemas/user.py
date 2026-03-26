@@ -1,19 +1,23 @@
-from pydantic import BaseModel
-from typing import Optional
 from datetime import datetime
+from pydantic import BaseModel, EmailStr, Field
 
 
 class UserBase(BaseModel):
-    name: str
-    email: str
+    name: str = Field(min_length=1, max_length=100)
+    email: EmailStr
 
 
 class UserCreate(UserBase):
-    hashed_password: str
+    password: str = Field(min_length=8, max_length=128)
 
 
 class UserUpdate(UserBase):
-    password: Optional[str] = None
+    password: str | None = Field(default=None, min_length=8, max_length=128)
+
+
+class UserList(BaseModel):
+    items: list['User']
+    total: int
 
 
 class UserInDBBase(UserBase):

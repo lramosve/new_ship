@@ -3,8 +3,12 @@ from sqlalchemy.orm import declarative_base as orm_declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 
-# Load environment variables - default to SQLite for development
-DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./ship_db.db')
+# Load environment variables - use SQLite unless a non-placeholder DATABASE_URL is supplied.
+raw_database_url = os.getenv('DATABASE_URL', '').strip()
+if not raw_database_url or 'your_username' in raw_database_url or 'your_password' in raw_database_url:
+    DATABASE_URL = 'sqlite:///./ship_db.db'
+else:
+    DATABASE_URL = raw_database_url
 
 # Create the engine - add special handling for SQLite
 engine_kwargs = {}

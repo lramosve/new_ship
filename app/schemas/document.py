@@ -1,13 +1,15 @@
-from typing import Optional
-from pydantic import BaseModel
 from datetime import datetime
-from app.models.document import Document
+from typing import Literal
+from pydantic import BaseModel, Field
+
+
+DocumentType = Literal['markdown', 'spec', 'note', 'report']
 
 
 class DocumentBase(BaseModel):
-    title: str
-    type: str
-    content: Optional[str]
+    title: str = Field(min_length=1, max_length=200)
+    type: DocumentType
+    content: str | None = Field(default=None, max_length=5000)
 
 
 class DocumentCreate(DocumentBase):
@@ -16,6 +18,11 @@ class DocumentCreate(DocumentBase):
 
 class DocumentUpdate(DocumentBase):
     pass
+
+
+class DocumentList(BaseModel):
+    items: list['Document']
+    total: int
 
 
 class DocumentInDBBase(DocumentBase):

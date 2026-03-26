@@ -1,11 +1,10 @@
-from pydantic import BaseModel
-from typing import Optional
 from datetime import datetime
+from pydantic import BaseModel, Field
 
 
 class PlanBase(BaseModel):
-    description: str
-    week_number: int
+    description: str = Field(min_length=1, max_length=1000)
+    week_number: int = Field(ge=1, le=53)
 
 
 class PlanCreate(PlanBase):
@@ -14,6 +13,11 @@ class PlanCreate(PlanBase):
 
 class PlanUpdate(PlanBase):
     pass
+
+
+class PlanList(BaseModel):
+    items: list['Plan']
+    total: int
 
 
 class PlanInDBBase(PlanBase):
