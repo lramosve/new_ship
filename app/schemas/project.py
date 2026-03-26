@@ -18,5 +18,4 @@ class ProjectList(BaseModel):
 class Project(ProjectBase):
     id: int
 
-    class ConfigDict:
-        from_attributes = True
+    model_config = {"from_attributes": True}

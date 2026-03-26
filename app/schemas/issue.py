@@ -30,8 +30,7 @@ class IssueInDBBase(IssueBase):
     created_at: datetime
     updated_at: datetime
 
-    class ConfigDict:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class Issue(IssueInDBBase):

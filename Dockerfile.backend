@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY alembic ./alembic
 COPY alembic.ini ./alembic.ini
 COPY app ./app
+COPY seed.py ./seed.py
 COPY docker/backend-entrypoint.sh /app/docker/backend-entrypoint.sh
 
 RUN mkdir -p /app/data /app/docker \

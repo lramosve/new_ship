@@ -25,8 +25,7 @@ class PlanInDBBase(PlanBase):
     created_at: datetime
     updated_at: datetime
 
-    class ConfigDict:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class Plan(PlanInDBBase):
