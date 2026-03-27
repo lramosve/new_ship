@@ -1,6 +1,6 @@
-# Shipyard
+# Ship
 
-Shipyard is a containerized FastAPI + React workspace for authenticated project, document, issue, plan, and user management.
+Ship is a containerized FastAPI + React workspace for authenticated project, document, issue, plan, and user management.
 
 ## Live Demo
 
