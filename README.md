@@ -2,6 +2,17 @@
 
 Shipyard is a containerized FastAPI + React workspace for authenticated project, document, issue, plan, and user management.
 
+## Live Demo
+
+The application is deployed on Railway:
+
+- **Frontend:** https://frontend-production-20c1.up.railway.app
+- **Backend API:** https://backend-production-d97a.up.railway.app
+
+**Demo account:**
+- Email: `dev@ship.dev`
+- Password: `admin123`
+
 ## Docker quickstart
 
 Run the full stack from the repository root:
